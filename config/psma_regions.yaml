@@ -15,12 +15,17 @@ entrance_lid:
   # ligands), exposing the arene-binding site (Trp541, Arg463, Arg511).
   range: [541, 548]
   arene_site: [W541, R463, R511]
-  # Calibration structures: a structured lid (3BHX) and an unstructured lid
-  # (2OOT), taken from structural-review figures. Verify against the papers
-  # you cite and extend as needed.
+  # Calibration structures (verify against the papers you cite; extend as needed):
+  #   3BHX - structured (helical) lid in structural-review figures      -> closed
+  #   2XEG - ARM-P4 stacks on Trp541 in the arene-binding site, which is
+  #          only accessible when the lid is open                         -> open
+  # 2OOT was used originally as the "open" example, but its lid residues are
+  # not modelled (the pipeline calls it "disordered"), so it cannot calibrate
+  # an open conformation. It is kept in the validation set as the
+  # disordered-lid example instead.
   known_states:
     3BHX: closed
-    2OOT: open
+    2XEG: open
   classifier:
     helix_ca_i3_max: 6.0             # Å; CA(i)-CA(i+3) ~5.0-5.5 Å in a helix, > 8 Å extended
     helix_fraction_min: 0.6          # fraction of i,i+3 pairs that must look helical

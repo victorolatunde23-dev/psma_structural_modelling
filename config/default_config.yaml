@@ -93,6 +93,6 @@ sanity:
     - lid_calibration
 
 validation_set:
-  fixed_ids: [3BHX, 2OOT, 9S7U]      # calibration structures + previous top template
+  fixed_ids: [3BHX, 2XEG, 2OOT, 9S7U]   # lid calibration (closed, open), disordered-lid example, previous top template
   extra_ids: []                      # e.g. an entry with a disordered lid
   previous_workbook: null            # path to an earlier workbook (used to pick a disordered-lid entry)

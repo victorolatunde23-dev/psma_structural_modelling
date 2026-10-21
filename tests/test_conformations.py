@@ -10,7 +10,7 @@ from psma_pipeline.conformations import (helicity, kabsch, lid_conformation, lid
                                          structural_variability, two_means_1d)
 
 LID_CFG = {"range": (541, 548), "arene_site": ["W541", "R463", "R511"],
-           "known_states": {"3BHX": "closed", "2OOT": "open"},
+           "known_states": {"3BHX": "closed", "2XEG": "open"},
            "classifier": {"helix_ca_i3_max": 6.0, "helix_fraction_min": 0.6, "min_lid_modelled": 6,
                           "ashman_d_min": 2.0, "min_complete_lids_for_clustering": 4,
                           "cluster_helicity_gap": 0.2, "superposition_exclusion_margin": 2}}
@@ -35,7 +35,7 @@ def make_chains(seed=1):
     ca = {(f"C{i}AA", "A"): chain(helix, 0.3 * i) for i in range(5)}
     ca.update({(f"O{i}AA", "A"): chain(ext, 0.3 * i) for i in range(5)})
     ca[("3BHX", "A")] = chain(helix)
-    ca[("2OOT", "A")] = chain(ext)
+    ca[("2XEG", "A")] = chain(ext)
     dis = chain(helix)
     for n in range(541, 546):
         dis.pop(n)
@@ -82,7 +82,7 @@ def test_lid_classifier_states_and_rules():
     cal = df.set_index("PDB ID")
     assert cal.loc["3BHX", "Calibration label (literature)"] == "closed"
     assert pd.isna(cal.loc["3BHX"].get("Vote: reference"))  # calibration never votes for itself
-    assert cal.loc["3BHX", "Lid state"] == "closed" and cal.loc["2OOT", "Lid state"] == "open"
+    assert cal.loc["3BHX", "Lid state"] == "closed" and cal.loc["2XEG", "Lid state"] == "open"
 
 
 def test_lid_entry_summary_mixed_and_low_resolution():

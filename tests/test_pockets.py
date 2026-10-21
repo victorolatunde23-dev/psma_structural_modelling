@@ -97,6 +97,8 @@ def test_zinc_coordination_and_contacts(ctx):
     assert dist["H377/A NE2"] == pytest.approx(2.05, abs=0.01)
     assert dist["D387/A OD1"] == pytest.approx(2.10, abs=0.01)
     assert zn["Coordination number"] == 3                    # His, Asp and one water
+    assert zn["Donor coordination number"] == 3
+    assert dict(coordination_distances(zn, "Donor atoms (N/O/S: Å)"))["HOH1001 O"] == pytest.approx(2.0, abs=0.01)
     assert zn["Waters in contact"] == 1 and zn["Ligand atom–water pairs"] == 1
     assert zn["Symmetry-mate contact"] is False
     assert zn["Cutoff (Å)"] == 2.8

@@ -51,6 +51,17 @@ as symmetry contacts. Distances now use the nearest periodic image
 (`UnitCell.find_nearest_pbc_image`). A regression test covers a contact
 across a cell edge.
 
+### Validation-set findings in Colab (first real run)
+
+- **Lid calibration.** 2OOT has an unmodelled lid, so the classifier correctly
+  calls it *disordered*. It can't serve as the "open" calibration structure.
+  - The open calibration is now **2XEG**: ARM-P4 sits in the arene-binding site, which requires an open lid.
+  - 2OOT stays in the validation set as the disordered-lid example.
+  - The lid-calibration check now returns FAIL only when the classifier calls the *opposite* state. An unusable calibration structure gives a WARNING.
+- **Zn coordination.** `Coordination (atom: Å)` lists every atom within 2.8 Å, including carbons such as Asp CG of a bidentate carboxylate. Two new columns list potential ligand atoms only, and the Zn distance check uses them:
+  - `Donor coordination number`;
+  - `Donor atoms (N/O/S: Å)`, with alternate locations marked.
+
 ### Added columns
 - **Summary:**
   - `Assembly choice reason`, `Assembly copies source`, `RCSB assembly chain count`

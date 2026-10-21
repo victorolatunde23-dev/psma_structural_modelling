@@ -15,7 +15,7 @@ def test_default_config_loads_target_files():
     cfg = load_config()
     assert cfg.accession == "Q04609"
     assert cfg.lid["range"] == (541, 548)
-    assert cfg.lid["known_states"] == {"3BHX": "closed", "2OOT": "open"}
+    assert cfg.lid["known_states"] == {"3BHX": "closed", "2XEG": "open"}
     assert "H377" in cfg.active_site["literature_sites"]
     assert "ZN" in cfg.ligand_classes["ions_of_interest"]
     assert cfg.get("ranking.modes.global.criteria")[0]["column"] == "Resolution (Å)"

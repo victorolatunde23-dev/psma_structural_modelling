@@ -39,11 +39,13 @@ def test_unexplained_active_site_mismatch_is_a_numbering_failure():
     assert statuses(check_active_site_sequence(active, chains)) == ["WARNING", "FAIL"]
 
 
-def test_lid_calibration_disagreement_fails():
+def test_lid_calibration_outcomes():
     lid = pd.DataFrame([{"PDB ID": "3BHX", "Chain": "A", "Lid state": "open"},
-                        {"PDB ID": "2OOT", "Chain": "A", "Lid state": "open"}])
-    out = check_lid_calibration(lid, {"3BHX": "closed", "2OOT": "open", "9XXX": "open"})
-    assert statuses(out) == ["FAIL", "PASS", "NOT RUN"]
+                        {"PDB ID": "2XEG", "Chain": "A", "Lid state": "open"},
+                        {"PDB ID": "2OOT", "Chain": "A", "Lid state": "disordered (not modelled)"}])
+    out = check_lid_calibration(lid, {"3BHX": "closed", "2XEG": "open", "2OOT": "open", "9XXX": "open"})
+    # opposite state = classifier wrong (FAIL); unmodelled lid = unusable calibration (WARNING)
+    assert statuses(out) == ["FAIL", "PASS", "WARNING", "NOT RUN"]
 
 
 def test_open_lid_with_missing_residues_fails():
@@ -54,11 +56,19 @@ def test_open_lid_with_missing_residues_fails():
 def test_zn_distance_outside_range_is_flagged():
     b = pd.DataFrame([
         {"PDB ID": "A", "Component": "ZN", "Chain": "A", "Residue no.": "801",
-         "Coordination (atom: Å)": "H377/A NE2: 2.05; D387/A OD1: 2.10; HOH5 O: 3.10"},
+         "Coordination (atom: Å)": "H377/A NE2: 2.05; D387/A OD1: 2.10; HOH5 O: 2.15"},
         {"PDB ID": "B", "Component": "ZN", "Chain": "A", "Residue no.": "801",
          "Coordination (atom: Å)": "H377/A NE2: 2.75"},
     ])
     assert statuses(check_zn_distances(b, (1.8, 2.6))) == ["PASS", "WARNING"]
+
+
+def test_zn_check_ignores_carbon_atoms_inside_the_cutoff():
+    # Asp CG of a bidentate carboxylate sits ~2.6-2.8 Å from Zn but is not a ligand
+    b = pd.DataFrame([{"PDB ID": "A", "Component": "ZN", "Chain": "A", "Residue no.": "801",
+                       "Coordination (atom: Å)": "D453/A OD1: 2.05; D453/A CG: 2.70; H553/A NE2: 2.10",
+                       "Donor atoms (N/O/S: Å)": "D453/A OD1: 2.05; H553/A NE2: 2.10"}])
+    assert statuses(check_zn_distances(b, (1.8, 2.6))) == ["PASS"]
 
 
 def test_zn_count_per_protomer():

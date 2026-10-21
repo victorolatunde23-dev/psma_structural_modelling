@@ -16,9 +16,9 @@ def test_calibration_structures_end_to_end(tmp_path):
     pytest.importorskip("gemmi")
     from psma_pipeline.survey import run_survey
     cfg = load_config(overrides={"paths": {"outputs": str(tmp_path)}})
-    res = run_survey(cfg, ids=["3BHX", "2OOT"])
+    res = run_survey(cfg, ids=["3BHX", "2XEG"])
     s = res.tables["Summary"].set_index("PDB ID")
-    assert set(s.index) == {"3BHX", "2OOT"}
+    assert set(s.index) == {"3BHX", "2XEG"}
     assert (s["Monomer / dimer"] == "dimer").all()          # PSMA is a homodimer
     sanity = run_sanity_checks(res.tables, cfg)
     assert critical_failures(sanity).empty, critical_failures(sanity).to_string()

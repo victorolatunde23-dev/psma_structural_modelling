@@ -118,7 +118,12 @@ def check_active_site_sequence(active: pd.DataFrame, chains: pd.DataFrame) -> li
 
 
 def check_lid_calibration(lid: pd.DataFrame, known_states: dict) -> list[dict]:
-    """Calibration structures must receive their literature lid state."""
+    """Calibration structures must receive their literature lid state.
+
+    FAIL when the geometric call is the opposite state; WARNING when the lid
+    is not modelled (the structure cannot calibrate anything, but the
+    classifier is not wrong).
+    """
     if not known_states:
         return [_row("lid_calibration", Status.NOT_APPLICABLE, "no calibration structures configured")]
     out = []
@@ -129,9 +134,14 @@ def check_lid_calibration(lid: pd.DataFrame, known_states: dict) -> list[dict]:
             continue
         for _, r in g.iterrows():
             call = r.get("Lid state")
-            st = Status.PASS if call == state else Status.FAIL
-            out.append(_row("lid_calibration", st, f"literature {state}, geometric call {call}",
-                            pdb, r.get("Chain")))
+            if call == state:
+                st, msg = Status.PASS, f"literature {state}, geometric call {call}"
+            elif call in ("open", "closed"):
+                st, msg = Status.FAIL, f"literature {state}, geometric call {call}: classifier disagrees"
+            else:
+                st, msg = Status.WARNING, (f"literature {state}, but lid is '{call}': unusable as a "
+                                           "calibration structure; replace it in psma_regions.yaml")
+            out.append(_row("lid_calibration", st, msg, pdb, r.get("Chain")))
     return out
 
 
@@ -168,17 +178,22 @@ def check_zn_count(summary: pd.DataFrame, expected_per_protomer: int, ion_label:
 
 
 def check_zn_distances(binding: pd.DataFrame, rng: tuple[float, float], comp: str = "ZN") -> list[dict]:
-    """First-shell Zn–protein/ligand distances (waters excluded) within the configured range."""
+    """Zn–donor distances (N/O/S atoms of protein, ligands and waters) within the configured range.
+
+    Carbon atoms within the metal cut-off (e.g. Asp CG of a bidentate
+    carboxylate) are not ligands and are ignored.
+    """
     if not len(binding):
         return [_row("zn_coordination_distances", Status.NOT_RUN, "no binding-site rows")]
     out = []
+    col = "Donor atoms (N/O/S: Å)" if "Donor atoms (N/O/S: Å)" in binding else "Coordination (atom: Å)"
     for _, r in binding[binding["Component"] == comp].iterrows():
-        d = [(a, x) for a, x in coordination_distances(r) if not a.startswith("HOH")]
+        d = coordination_distances(r, col)
         bad = [f"{a} {x:.2f}" for a, x in d if not (rng[0] <= x <= rng[1])]
         where = f"{r['Chain']} {r['Residue no.']}"
         if not d:
             out.append(_row("zn_coordination_distances", Status.WARNING,
-                            f"{where}: no non-water coordinating atom", r["PDB ID"], r["Chain"]))
+                            f"{where}: no N/O/S donor within the cut-off", r["PDB ID"], r["Chain"]))
         elif bad:
             out.append(_row("zn_coordination_distances", Status.WARNING,
                             f"{where}: outside {rng[0]}–{rng[1]} Å: " + "; ".join(bad), r["PDB ID"], r["Chain"]))

@@ -73,6 +73,7 @@ def binding_site_analysis(pdb: str, ctx: dict, outliers: dict, classes: dict,
             contacts: dict[str, float] = {}
             other_het: dict[str, float] = {}
             coordination: list[tuple[str, float]] = []
+            donors: list[tuple[str, float]] = []
             env_b: list[float] = []
             water_pairs, water_ids, sym_contact = 0, set(), False
             outlier_hits, mismatches = set(), set()
@@ -90,6 +91,7 @@ def binding_site_analysis(pdb: str, ctx: dict, outliers: dict, classes: dict,
                         water_ids.add((key, sym, round(d, 2) if sym else 0))
                         if shell:
                             coordination.append((f"HOH{cra.residue.seqid.num} O", d))
+                            donors.append((f"HOH{cra.residue.seqid.num} O{_alt(cra.atom)}", d))
                         continue
                     lab = residue_label(cra.chain.name, cra.residue, l2u, tsubs, sym)
                     if cra.residue.entity_type == gemmi.EntityType.Polymer:
@@ -107,6 +109,8 @@ def binding_site_analysis(pdb: str, ctx: dict, outliers: dict, classes: dict,
                         other_het[lab] = min(d, other_het.get(lab, 99))
                     if shell:
                         coordination.append((f"{lab} {cra.atom.name}", d))
+                        if cra.atom.element.name.upper() in DONOR_ELEMENTS:
+                            donors.append((f"{lab} {cra.atom.name}{_alt(cra.atom)}", d))
 
             lig_b = [a.b_iso for a in res]
             occ = [a.occ for a in res]
@@ -139,6 +143,9 @@ def binding_site_analysis(pdb: str, ctx: dict, outliers: dict, classes: dict,
                 "Coordination (atom: Å)": "; ".join(
                     f"{a}: {d:.2f}" for a, d in sorted(coordination, key=lambda t: t[1]))
                     if coordination else "",
+                "Donor coordination number": len(donors) if shell else None,
+                "Donor atoms (N/O/S: Å)": "; ".join(
+                    f"{a}: {d:.2f}" for a, d in sorted(donors, key=lambda t: t[1])) if donors else "",
                 "Validation outliers in site": "; ".join(sorted(outlier_hits)),
                 "Residue/UniProt mismatches": ", ".join(sorted(mismatches)),
                 "Calculation status": (Status.WARNING if warn else Status.OK).value,
@@ -147,10 +154,24 @@ def binding_site_analysis(pdb: str, ctx: dict, outliers: dict, classes: dict,
     return rows
 
 
-def coordination_distances(row: dict) -> list[tuple[str, float]]:
-    """Parse ``Coordination (atom: Å)`` back into ``[(partner, distance), ...]``."""
+DONOR_ELEMENTS = {"N", "O", "S"}
+
+
+def _alt(atom) -> str:
+    """`` (alt X)`` for atoms with an alternate location, else ``""``."""
+    return f" (alt {atom.altloc})" if atom.altloc not in ("\0", "", " ") else ""
+
+
+def coordination_distances(row: dict, column: str = "Coordination (atom: Å)") -> list[tuple[str, float]]:
+    """Parse a coordination column back into ``[(partner, distance), ...]``.
+
+    ``Coordination (atom: Å)`` lists every atom within the metal cut-off
+    (including carbons such as Asp CG); ``Donor atoms (N/O/S: Å)`` lists only
+    potential ligand atoms (N, O, S, waters) and is the one to use for
+    coordination geometry.
+    """
     out = []
-    for part in str(row.get("Coordination (atom: Å)") or "").split(";"):
+    for part in str(row.get(column) or "").split(";"):
         if ":" in part:
             a, d = part.rsplit(":", 1)
             try:

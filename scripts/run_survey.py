@@ -5,7 +5,7 @@ Examples
 --------
     python scripts/run_survey.py                          # validation set, then full survey
     python scripts/run_survey.py --validation-only
-    python scripts/run_survey.py --ids 3BHX 2OOT --tag test
+    python scripts/run_survey.py --ids 3BHX 2XEG --tag test
     python scripts/run_survey.py --config my_config.yaml --previous old_workbook.xlsx
 """
 
