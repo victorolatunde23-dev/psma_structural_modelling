@@ -84,8 +84,10 @@ B 2
 loop_
 _pdbx_struct_assembly.id
 _pdbx_struct_assembly.details
+_pdbx_struct_assembly.method_details
+_pdbx_struct_assembly.oligomeric_details
 _pdbx_struct_assembly.oligomeric_count
-1 author_defined_assembly 2
+1 author_defined_assembly ? dimeric 2
 loop_
 _pdbx_struct_assembly_gen.assembly_id
 _pdbx_struct_assembly_gen.oper_expression
@@ -138,7 +140,10 @@ def test_gemmi_assembly_expansion_counts_symmetry_generated_dimer():
     gemmi = pytest.importorskip("gemmi")
     from psma_pipeline.assemblies import coordinate_analysis
 
+    # gemmi reads _pdbx_struct_assembly only when id, details, method_details,
+    # oligomeric_details and oligomeric_count are all present (as in real PDB files).
     st = gemmi.make_structure_from_block(gemmi.cif.read_string(MMCIF_ASU_MONOMER).sole_block())
+    assert len(st.assemblies) == 1, "test mmCIF not parsed as one assembly"
     st.setup_entities()
     info = coordinate_analysis(st, {"1"})
     assert info["target_subs"] == {"A"}
@@ -150,3 +155,4 @@ def test_gemmi_assembly_expansion_counts_symmetry_generated_dimer():
     assert info["count_subs"]("1", ["B"]) == 2
     assert info["expand"]("99") == (None, None)      # unknown assembly is reported, not guessed
     assert info["model_number"] == 1
+    assert info["assembly_names"] == ["1"]
