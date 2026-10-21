@@ -259,7 +259,8 @@ pockets:                        # Milestone 3: ligand interaction fingerprints
     hierarchical_method: average
     distance_thresholds: [0.3, 0.4, 0.5, 0.6, 0.7]   # 1 − Tanimoto; diagnostics reported for each
     chosen_threshold: 0.5
-    dbscan_eps: 0.4
+    dbscan_eps: 0.25            # chosen eps (written to LigandClusters); 0.4 merged 79/84 ligands into one cluster
+    dbscan_eps_values: [0.2, 0.25, 0.3, 0.35, 0.4]   # diagnostics reported for each
     dbscan_min_samples: 3
   # Ligand-conditioned ranking (LigandConditionedRanking sheet). Leave null to skip
   # in the full run; the notebook can call rank_for_ligand() for any ligand afterwards.
@@ -285,7 +286,8 @@ waters:                         # Milestone 3: conserved structural waters
   max_resolution: 2.2           # Å, eligible X-ray structures only
   max_clashscore: 10
   superpose_on: active_site     # active_site | core (all common CA)
-  region_radius: 8.0            # Å, waters kept within this distance of Zn / active-site / ligand atoms
+  region_radius: 8.0            # Å, waters kept within this distance of Zn / catalytic-pocket / ligand atoms
+                                # (catalytic pocket = literature residues + Zn ligands + sub-pockets)
   cluster_distance: 1.2         # Å, complete-linkage clustering of water oxygens (reference frame)
   hbond_max: 3.5                # Å, water – protein N/O partners
   zn_bridge_max: 2.5            # Å, water within this distance of both Zn = bridging water/hydroxide

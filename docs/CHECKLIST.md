@@ -27,9 +27,9 @@ Status key:
 | 3 | Interface conservation | `variants.py` | ✅ variants categorised "dimer interface" in VariantStructureMapping; 🟡 real data |
 | 5 | wwPDB validation XML (schema recorded), LocalModelFit, LigandModelFit, EMMapFit, method-specific categories | `validation.py`, `local_fit.py` | ✅ offline (synthetic X-ray and EM XML); 🟡 real reports in Colab |
 | 8 | Ten ranking modes with filters, weights, missing policy, explanations; ligand-conditioned ranking | `ranking.py`, `assessment.py`, `pocket_analysis.rank_for_ligand`, config | ✅ offline; 🟡 ligand-conditioned on real data |
-| 4 | Pocket fingerprints (binary, weighted, typed), sub-pocket occupancy, similarity, clustering with diagnostics, ligand chemistry | `fingerprints.py`, `ligand_chem.py`, `pocket_analysis.py` | ✅ offline (synthetic geometry, end-to-end with stubbed gemmi); 🟡 real data, RDKit in Colab |
-| 14 | Conserved waters (superposition, complete-linkage clustering, Zn bridging, retain/consider/remove) | `waters.py` | ✅ offline; 🟡 real data |
-| 6 | Variant mapping (UniProt, optional EBI Proteins API; reference check; RSA, distances, RMSF, sequons, disulfides; hypotheses only) | `variants.py` | ✅ offline; 🟡 real data; AlphaFold columns M4 |
+| 4 | Pocket fingerprints (binary, weighted, typed), sub-pocket occupancy, similarity, clustering with diagnostics, ligand chemistry | `fingerprints.py`, `ligand_chem.py`, `pocket_analysis.py` | ✅ offline; ✅ Colab full run (169 ligand instances, 81 entries; RDKit descriptors 76/77, carborane DGQ unparseable) |
+| 14 | Conserved waters (superposition, complete-linkage clustering, Zn bridging, retain/consider/remove) | `waters.py` | ✅ offline; ✅ Colab: 77 sites, catalytic Zn-bridging water found in 54/77 (Zn–O 1.87 Å) |
+| 6 | Variant mapping (UniProt, optional EBI Proteins API; reference check; RSA, distances, RMSF, sequons, disulfides; hypotheses only) | `variants.py` | ✅ offline; ✅ Colab: 33 UniProt substitutions, 0 reference failures; AlphaFold columns M4 |
 | 7 | AlphaFold / ColabFold import and comparison | `alphafold.py` | ⬜ M4 |
 | 9 | Structure-repair assessment and rebuilding | `model_preparation.py` | ⬜ M5 |
 | 10 | Protonation and H-bond network | `model_preparation.py` | ⬜ M5 |

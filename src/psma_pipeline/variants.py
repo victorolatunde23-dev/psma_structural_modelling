@@ -242,11 +242,11 @@ def residue_environment(asm: pd.DataFrame, protomer: str, site_numbers: list[int
         for hits in all_tree.query_ball_point(xyz, contact_max):
             n_cont += sum(1 for h in hits if prot.index[h] not in own)
         row["Atom contacts (≤4.5 Å)"] = n_cont
-        for k, col in (("site", "Distance to active site (Å)"), ("lig", "Distance to ligand (Å)"),
+        for k, col in (("site", "Distance to catalytic pocket (Å)"), ("lig", "Distance to ligand (Å)"),
                        ("zn", "Distance to Zn (Å)"), ("partner", "Distance to partner protomer (Å)")):
             row[col] = round(float(trees[k].query(xyz)[0].min()), 2) if k in trees else None
         if int(unp) in site_numbers:
-            row["Distance to active site (Å)"] = 0.0
+            row["Distance to catalytic pocket (Å)"] = 0.0
         rows[int(unp)] = row
     return pd.DataFrame.from_dict(rows, orient="index")
 

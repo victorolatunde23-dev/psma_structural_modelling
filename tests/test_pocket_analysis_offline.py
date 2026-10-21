@@ -35,7 +35,7 @@ def _atoms(R: np.ndarray, t: np.ndarray) -> pd.DataFrame:
                      "target": polymer})
 
     for n in range(195, 260):
-        if n in (209, 210, 212):
+        if n in (209, 210, 257):
             continue
         add("ALA", n, "CA", "C", rng.normal(0, 3, 3) + np.array([15.0 + (n - 195) * 0.5, 15.0, 0.0]))
     ang = np.radians(np.arange(6) * 60)
@@ -45,8 +45,8 @@ def _atoms(R: np.ndarray, t: np.ndarray) -> pd.DataFrame:
     add("ARG", 210, "CA", "C", (0, -3, 0))
     add("ARG", 210, "CZ", "C", (0, -1.3, 0))
     add("ARG", 210, "NH1", "N", (0, 0, 0))
-    add("ASP", 212, "CA", "C", (0, 4.0, -2.0))
-    add("ASP", 212, "OD1", "O", (0, 3.65, 0.9))          # bridges both Zn (2.6 Å)
+    add("ASN", 257, "CA", "C", (0, 4.0, -2.0))            # N257: a configured literature (catalytic-pocket) residue
+    add("ASN", 257, "OD1", "O", (0, 3.65, 0.9))          # within 2.6 Å of both Zn
     for nm, a in zip(["C1", "C2", "C3", "C4", "C5", "C6"], ang):
         add("LIG", 701, nm, "C", (10 + 1.39 * np.cos(a), 1.39 * np.sin(a), 3.7), polymer=False, chain="L")
     add("LIG", 701, "O1", "O", (0, 0, 2.9), polymer=False, chain="L")

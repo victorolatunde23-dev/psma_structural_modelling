@@ -136,7 +136,7 @@ def test_residue_environment_columns():
     env = residue_environment(asm, "A|1", [2], {}, lambda c: "ion of interest", {"method": "shrake_rupley",
                                                                                    "n_points": 50})
     assert list(env.index) == [1, 2]
-    assert env.loc[2, "Distance to active site (Å)"] == 0.0
+    assert env.loc[2, "Distance to catalytic pocket (Å)"] == 0.0
     assert env.loc[2, "Distance to Zn (Å)"] == pytest.approx(np.hypot(1.5, 0.5), abs=0.01)
     assert env.loc[1, "Distance to partner protomer (Å)"] > env.loc[2, "Distance to partner protomer (Å)"]
     assert 0 < env.loc[1, "RSA"] <= 1.5

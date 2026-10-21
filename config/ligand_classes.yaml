@@ -19,7 +19,7 @@ glycans: [NAG, NDG, MAN, BMA, FUC, FUL, GAL, GLA, SIA, GLC, BGC, XYS, A2G, NGA]
 # as additives by default.
 additives: [HOH, DOD, GOL, EDO, PEG, PGE, PG4, 1PE, P6G, 2PE, 12P, 15P, PE4, PE8,
             MPD, MRD, DMS, ACT, ACY, FMT, SO4, PO4, NO3, SCN, IOD, BR, NA, K, MG,
-            NH4, TRS, MES, EPE, IMD, BTB, CIT, FLC, TAR, MLI, IPA, EOH, BU3, PGO,
+            NH4, TRS, TAM, MES, EPE, IMD, BTB, CIT, FLC, TAR, MLI, IPA, EOH, BU3, PGO,
             PGR, UNX, UNL]
 
 # Components treated as metal ions for contact cut-offs and coordination

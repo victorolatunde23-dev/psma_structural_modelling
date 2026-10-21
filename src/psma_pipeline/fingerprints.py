@@ -115,9 +115,16 @@ def ligand_fingerprint(pdb: str, lig: pd.DataFrame, env: pd.DataFrame, cfg: dict
     cmax, hb, ion = float(cfg["contact_max"]), float(cfg["hbond_max"]), float(cfg["ionic_max"])
     hp, arom, cpi = float(cfg["hydrophobic_max"]), float(cfg["aromatic_centroid_max"]), float(cfg["cation_pi_max"])
     mmax, wb, floor = float(cfg["metal_max"]), float(cfg["water_bridge_max"]), float(cfg["weight_floor"])
-    own_protomer = lig["protomer"].iloc[0] if "protomer" in lig else None
     lig = lig.reset_index(drop=True)
     prot = env[env["polymer"] & ~env["water"]].reset_index(drop=True)
+    # "home" protomer = the protein protomer with most atom contacts; others are partners.
+    # (The ligand's own protomer label belongs to its non-polymer chain and cannot be used.)
+    own_protomer = None
+    if len(prot) and "protomer" in prot:
+        hits = cKDTree(prot[["x", "y", "z"]].to_numpy()).query_ball_point(lig[["x", "y", "z"]].to_numpy(), float(cfg["contact_max"]))
+        counts = Counter(prot["protomer"].iloc[j] for h in hits for j in h)
+        if counts:
+            own_protomer = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
     water = env[env["water"]].reset_index(drop=True)
     metal = env[env["resname"].str.upper().isin(metals) & ~env["polymer"]].reset_index(drop=True)
     lx = lig[["x", "y", "z"]].to_numpy()
@@ -300,11 +307,16 @@ def cluster_ligands(T: np.ndarray, ids: list[str], cfg: dict) -> tuple[pd.DataFr
                      "Chosen": float(t) == float(cfg.get("chosen_threshold", 0.5))})
     chosen = labels_by_t.get(float(cfg.get("chosen_threshold", 0.5)), next(iter(labels_by_t.values())))
     from sklearn.cluster import DBSCAN
-    db = DBSCAN(eps=float(cfg.get("dbscan_eps", 0.4)), min_samples=int(cfg.get("dbscan_min_samples", 3)),
-                metric="precomputed").fit(D).labels_
-    diag.append({"Method": "DBSCAN", "Threshold (1 − Tanimoto)": cfg.get("dbscan_eps", 0.4),
-                 "Clusters": len(set(db) - {-1}), "Silhouette": None, "Chosen": None,
-                 "Noise points": int((db == -1).sum())})
+    chosen_eps = float(cfg.get("dbscan_eps", 0.25))
+    db = None
+    for eps in sorted({float(e) for e in cfg.get("dbscan_eps_values", [])} | {chosen_eps}):
+        lab = DBSCAN(eps=eps, min_samples=int(cfg.get("dbscan_min_samples", 3)), metric="precomputed").fit(D).labels_
+        sizes = sorted(np.bincount(lab[lab >= 0]).tolist(), reverse=True) if (lab >= 0).any() else []
+        diag.append({"Method": "DBSCAN", "Threshold (1 − Tanimoto)": eps, "Clusters": len(set(lab) - {-1}),
+                     "Silhouette": None, "Chosen": eps == chosen_eps, "Noise points": int((lab == -1).sum()),
+                     "Largest clusters": ", ".join(map(str, sizes[:5]))})
+        if eps == chosen_eps:
+            db = lab
     return (pd.DataFrame({"Ligand instance": ids, "Hierarchical cluster": chosen, "DBSCAN cluster": db}),
             pd.DataFrame(diag))
 

@@ -61,6 +61,19 @@ def test_fingerprint_interaction_types_and_subpockets():
     assert fp["partner"] is False
 
 
+def test_partner_protomer_is_relative_to_the_most_contacted_protein_chain():
+    lig, env = toy_site()
+    lig = lig.assign(protomer="L|1")                     # ligand chain label differs from every protein chain
+    partner = pd.DataFrame([atom("LEU", 680, "CD1", "C", (10, 0, 7.5), unp=680, chain="B", protomer="B|2")])
+    tab, fp = ligand_fingerprint("TEST", lig, pd.concat([env, partner], ignore_index=True), PCFG, {"x": {209}}, {"ZN"})
+    prot = tab.dropna(subset=["UniProt number"])
+    assert set(prot.loc[prot["Partner protomer"], "Protomer"]) == {"B|2"}
+    assert not prot.loc[prot["Protomer"] == "A|1", "Partner protomer"].any()
+    assert fp["partner"] is True
+    _, fp2 = ligand_fingerprint("TEST", lig, env, PCFG, {"x": {209}}, {"ZN"})
+    assert fp2["partner"] is False
+
+
 def test_fingerprint_empty_environment():
     lig, _ = toy_site()
     env = pd.DataFrame([atom("ALA", 1, "CB", "C", (100, 100, 100), unp=1)])
@@ -88,10 +101,12 @@ def test_similarity_table_and_clustering_deterministic():
     tab, T, ids = similarity_tables(fps)
     assert len(tab) == 6 and ids == ["A", "B", "C", "D"]
     assert T[0, 1] == 1.0 and T[0, 3] == 0.0
-    cfg = {"distance_thresholds": [0.3, 0.5], "chosen_threshold": 0.5, "dbscan_eps": 0.4, "dbscan_min_samples": 2}
+    cfg = {"distance_thresholds": [0.3, 0.5], "chosen_threshold": 0.5, "dbscan_eps": 0.4,
+           "dbscan_eps_values": [0.2, 0.4], "dbscan_min_samples": 2}
     cl, diag = cluster_ligands(T, ids, cfg)
     lab = dict(zip(cl["Ligand instance"], cl["Hierarchical cluster"]))
     assert lab["A"] == lab["B"] == lab["C"] != lab["D"]
     assert set(diag["Method"]) == {"hierarchical", "DBSCAN"}
+    assert len(diag[diag["Method"] == "DBSCAN"]) == 2 and diag.loc[diag["Method"] == "DBSCAN", "Chosen"].sum() == 1
     cl2, _ = cluster_ligands(T, ids, cfg)
     assert cl.equals(cl2)

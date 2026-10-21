@@ -122,10 +122,18 @@ def run_pocket_analysis(cfg: Config, tables: dict[str, pd.DataFrame], assessment
     subpockets, sp_def = subpocket_sets(cfg, seq)
     for _, r in sp_def[sp_def["Status"] == Status.FAIL.value].iterrows():
         issues.add("pockets", Status.WARNING, f"sub-pocket residue {r['Residue']} dropped: {r['Reason']}")
-    sites = _site_numbers(tables)
+    broad_sites = _site_numbers(tables)          # survey active-site definition (incl. UniProt Ca/Cl sites)
+    lit_valid, _ = validate_residue_codes(list((cfg.active_site.get("literature_sites") or {}).keys()), seq)
+    zn_lig = {parse_residue_code(c)[1] for lst in (cfg.active_site.get("metal_site", {}).get("zn_ligands") or {}).values()
+              for c in validate_residue_codes(lst, seq)[0]}
+    core_sites = {parse_residue_code(c)[1] for c in lit_valid} | zn_lig
+    pocket_union = set().union(*subpockets.values()) if subpockets else set()
+    # catalytic pocket = literature residues + Zn ligands + sub-pockets: region for waters and
+    # "distance to catalytic pocket"; superposition uses the broader survey set as well.
+    sites = sorted(core_sites | pocket_union) or broad_sites
+    super_sites = sorted(set(sites) | set(broad_sites))
     if not sites:
-        issues.add("pockets", Status.WARNING, "no validated active-site residues in the survey tables")
-    pocket_union = set().union(*subpockets.values()) if subpockets else set(sites)
+        issues.add("pockets", Status.WARNING, "no validated catalytic-pocket residues")
     ref_pdb = _reference_entry(tables, assessment, ids)
 
     fps: dict[str, dict] = {}
@@ -276,7 +284,7 @@ def run_pocket_analysis(cfg: Config, tables: dict[str, pd.DataFrame], assessment
     ref_site = None
     if ref_pdb and any(w.pdb == ref_pdb for w in water_sites):
         ref_site = next((w.pdb, w.chain) for w in water_sites if w.pdb == ref_pdb)
-    w_clusters, w_members, w_sites = conserved_waters(water_sites, wcfg, sites, ref_site)
+    w_clusters, w_members, w_sites = conserved_waters(water_sites, wcfg, super_sites, ref_site)
     if not water_sites:
         issues.add("waters", Status.NOT_APPLICABLE, "no eligible high-resolution X-ray sites in this run")
     presence = conserved_presence(w_members, w_clusters)
@@ -292,9 +300,7 @@ def run_pocket_analysis(cfg: Config, tables: dict[str, pd.DataFrame], assessment
     for _, r in failed.iterrows():
         issues.add("variants", Status.WARNING, f"{r['Substitution']}: {r['Status reason']}")
     rmsf, _ = ca_rmsf(ca_all, None)
-    zn_lig = {parse_residue_code(c)[1] for lst in (cfg.active_site.get("metal_site", {}).get("zn_ligands") or {}).values()
-              for c in lst}
-    ctx = {"site_numbers": set(sites), "zn_ligands": zn_lig, "subpockets": subpockets, "rmsf": rmsf,
+    ctx = {"site_numbers": core_sites, "zn_ligands": zn_lig, "subpockets": subpockets, "rmsf": rmsf,
            "regions": cfg.flexible_regions, "disulfide_cys": {c for pair in disulfides(entry) for c in pair}}
     frac = {n: round(c / n_chains, 3) for n, c in modelled_count.items()} if n_chains else {}
     if ref_env.empty:

@@ -147,3 +147,10 @@ The CSV/Parquet tables and the interface Jaccard matrix are also written. The su
 - **Variants:** reference residue checked against the canonical sequence (mismatches are FAIL and not mapped); structural context from the top `md_start` template's assembly; text is always a hypothesis, never a prediction.
 
 **Changed in part 1:** the LocalModelFit "conserved waters" row is now NOT APPLICABLE with a pointer to the new workbook (was NOT RUN, "Milestone 3").
+
+### Milestone 3 — fixes after the first full Colab run (90 entries, 8/8 pocket checks PASS)
+
+- **Partner-protomer flag (bug).** Every ligand was flagged as touching a partner protomer, because the ligand's own label (its non-polymer chain) was compared with protein chains. The ligand's "home" protomer is now the protein protomer it contacts most. On the real data only 6H7Y TAM truly reaches the other protomer.
+- **Catalytic pocket definition.** The survey's active-site set includes UniProt Ca/Cl binding sites, so the water region and the variants' "distance to active site" covered a much larger area (e.g. V627L at 1.3 Å from the "active site", 39 Å from Zn). Waters and variants now use the *catalytic pocket*: literature residues + Zn ligands + sub-pockets. The column is renamed `Distance to catalytic pocket (Å)`. Superposition still uses the broader set.
+- **DBSCAN.** eps 0.4 merged 79/84 ligands into one cluster. Default eps is now 0.25, and the diagnostics report eps 0.2–0.4.
+- **TAM** (a tris analogue, buffer) is now an additive. This also removes it from the ligands of interest in notebook 01.
