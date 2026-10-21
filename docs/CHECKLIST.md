@@ -19,9 +19,9 @@ Status key:
 | 19 | Original 14 sheets preserved | `survey.py`, `excel_output.py` | ✅ |
 | 19 | Frozen headers, filters, widths, status colours, data dictionary, CSV/Parquet | `excel_output.py` | ✅ |
 | 20 | Tests: SIFTS mapping, author/label chains, ranking missing values, lid classification, residue validation | `tests/` | ✅ |
-| 20 | Tests: assembly expansion, symmetry dimer counting, contacts, Zn distances, glycosylation | `tests/test_assemblies.py`, `tests/test_pockets.py` | 🟡 |
-| 20 | Validation-set selection and sanity checks | `sanity.py` | ✅ (selection), 🟡 (real-data run) |
-| 21 | Milestone regression: compare workbooks | `excel_output.compare_workbooks` | ✅ |
+| 20 | Tests: assembly expansion, symmetry dimer counting, contacts, Zn distances, glycosylation, cell-edge contacts | `tests/test_assemblies.py`, `tests/test_pockets.py` | ✅ passed in Colab (gemmi 0.7.5) |
+| 20 | Validation-set selection and sanity checks | `sanity.py` | ✅ validation set and full run (90 entries) in Colab; no critical FAIL |
+| 21 | Milestone regression: compare workbooks | `excel_output.compare_workbooks` | ✅ M1 vs original: all differences explained (docs/CHANGES.md) |
 | 3 | Dimer-interface analysis | `interfaces.py` | ⬜ M2 |
 | 5 | wwPDB validation XML, local model fit, EM map fit | `validation.py` | ⬜ M2 |
 | 8 | Ten ranking modes | `ranking.py` + config | 🟠 engine done (filters, weights, missing policy, explanations); `global` mode configured; other modes M2 |
