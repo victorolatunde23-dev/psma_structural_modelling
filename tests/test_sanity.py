@@ -59,8 +59,12 @@ def test_zn_distance_outside_range_is_flagged():
          "Coordination (atom: Å)": "H377/A NE2: 2.05; D387/A OD1: 2.10; HOH5 O: 2.15"},
         {"PDB ID": "B", "Component": "ZN", "Chain": "A", "Residue no.": "801",
          "Coordination (atom: Å)": "H377/A NE2: 2.75"},
+        {"PDB ID": "C", "Component": "ZN", "Chain": "A", "Residue no.": "801",
+         "Coordination (atom: Å)": "D453/A OD2: 1.41; H377/A NE2: 2.05"},
     ])
-    assert statuses(check_zn_distances(b, (1.8, 2.6))) == ["PASS", "WARNING"]
+    out = check_zn_distances(b, (1.8, 2.6))
+    assert statuses(out) == ["PASS", "PASS", "WARNING"]          # 2.75 Å = long contact; 1.41 Å = implausible
+    assert "long contacts" in out[1]["Detail"] and "implausibly short" in out[2]["Detail"]
 
 
 def test_zn_check_ignores_carbon_atoms_inside_the_cutoff():

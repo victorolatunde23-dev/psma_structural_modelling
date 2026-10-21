@@ -260,13 +260,13 @@ def process_entry(pdb: str, e: dict, sifts: dict, cfg: Config, useq: str,
         summary[f"{label} ASU"] = asu_ions[ion]
         summary[f"{label} assembly"] = ion_count(asm_het, ion)
     summary.update({
-        "Ligands of interest": ", ".join(lig_by_class["ligand of interest"]),
-        "Glycans": ", ".join(lig_by_class["glycan"]),
+        "Ligands of interest": ", ".join(sorted(lig_by_class["ligand of interest"])),
+        "Glycans": ", ".join(sorted(lig_by_class["glycan"])),
         "Glycan chains ASU": glycan_chains_asu,
         "Glycan chains assembly": glycan_chains_asm,
         "Glycan residues assembly (NAG+MAN+...)": (sum(n for k, n in asm_het.items() if k in glycan_set)
                                                     if asm_het is not None else None),
-        "Additives / buffer": ", ".join(lig_by_class["additive / buffer"]),
+        "Additives / buffer": ", ".join(sorted(lig_by_class["additive / buffer"])),
         "Other polymer entities": "; ".join(
             (o["rcsb_polymer_entity"] or {}).get("pdbx_description") or "" for o in others),
         "Assembly used": f"{asm_id} ({(chosen or {}).get('pdbx_struct_assembly', {}).get('details')})"

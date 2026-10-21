@@ -353,13 +353,15 @@ def _keys(df: pd.DataFrame) -> list[str]:
 
 
 def _equal(a: object, b: object, tol: float) -> bool:
+    """Numbers within ``tol``; strings equal, or equal as unordered ', '-separated lists."""
     if (a is None or (isinstance(a, float) and np.isnan(a))) and \
        (b is None or (isinstance(b, float) and np.isnan(b))):
         return True
     try:
         return abs(float(a) - float(b)) <= tol
     except (TypeError, ValueError):
-        return str(a).strip() == str(b).strip()
+        sa, sb = str(a).strip(), str(b).strip()
+        return sa == sb or sorted(sa.split(", ")) == sorted(sb.split(", "))
 
 
 def compare_workbooks(old: str | Path, new: str | Path, sheets: Iterable[str] | None = None,
@@ -395,8 +397,15 @@ def compare_workbooks(old: str | Path, new: str | Path, sheets: Iterable[str] | 
             rows.append({"Sheet": s, "Kind": "empty in both"}); continue
         if not keys:
             rows.append({"Sheet": s, "Kind": "not compared", "Detail": "no key columns"}); continue
-        a2 = a.drop_duplicates(keys).set_index(keys)
-        b2 = b.drop_duplicates(keys).set_index(keys)
+        # repeated keys (e.g. several oligosaccharide rows per entry) are matched by occurrence,
+        # after sorting on the shared columns so that row order does not matter
+        shared = [c for c in a.columns if c in b.columns]
+        a = a.loc[a[shared].astype(str).sort_values(shared).index]
+        b = b.loc[b[shared].astype(str).sort_values(shared).index]
+        a = a.assign(_occ=a.groupby(keys, dropna=False).cumcount())
+        b = b.assign(_occ=b.groupby(keys, dropna=False).cumcount())
+        a2 = a.set_index(keys + ["_occ"])
+        b2 = b.set_index(keys + ["_occ"])
         common = a2.index.intersection(b2.index)
         if len(common) < len(a2):
             rows.append({"Sheet": s, "Kind": "rows only in old", "Old": len(a2) - len(common)})
@@ -409,7 +418,9 @@ def compare_workbooks(old: str | Path, new: str | Path, sheets: Iterable[str] | 
                 rows.append({"Sheet": s, "Kind": "values differ", "Column": c,
                              "Detail": f"{len(diff)} of {len(common)} rows"})
                 for k in diff[: max(0, max_cells - shown)]:
-                    rows.append({"Sheet": s, "Kind": "cell", "Key": str(k), "Column": c,
+                    *kk, occ = k if isinstance(k, tuple) else (k,)
+                    label = (kk[0] if len(kk) == 1 else str(tuple(kk))) + (f" #{occ + 1}" if occ else "")
+                    rows.append({"Sheet": s, "Kind": "cell", "Key": label, "Column": c,
                                  "Old": a2.at[k, c], "New": b2.at[k, c]})
                     shown += 1
     return pd.DataFrame(rows, columns=["Sheet", "Kind", "Key", "Column", "Old", "New", "Detail"])

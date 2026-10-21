@@ -181,7 +181,10 @@ def check_zn_distances(binding: pd.DataFrame, rng: tuple[float, float], comp: st
     """Zn–donor distances (N/O/S atoms of protein, ligands and waters) within the configured range.
 
     Carbon atoms within the metal cut-off (e.g. Asp CG of a bidentate
-    carboxylate) are not ligands and are ignored.
+    carboxylate) are not ligands and are ignored. Donors between the upper
+    bound and the metal cut-off (typically the second oxygen of a bidentate
+    carboxylate, such as D453 in PSMA) are listed as long contacts (PASS).
+    Distances below the lower bound are physically implausible (WARNING).
     """
     if not len(binding):
         return [_row("zn_coordination_distances", Status.NOT_RUN, "no binding-site rows")]
@@ -189,17 +192,21 @@ def check_zn_distances(binding: pd.DataFrame, rng: tuple[float, float], comp: st
     col = "Donor atoms (N/O/S: Å)" if "Donor atoms (N/O/S: Å)" in binding else "Coordination (atom: Å)"
     for _, r in binding[binding["Component"] == comp].iterrows():
         d = coordination_distances(r, col)
-        bad = [f"{a} {x:.2f}" for a, x in d if not (rng[0] <= x <= rng[1])]
+        long_ = [f"{a} {x:.2f}" for a, x in d if x > rng[1]]          # up to the metal cut-off
+        bad = [f"{a} {x:.2f}" for a, x in d if x < rng[0]]
         where = f"{r['Chain']} {r['Residue no.']}"
         if not d:
             out.append(_row("zn_coordination_distances", Status.WARNING,
                             f"{where}: no N/O/S donor within the cut-off", r["PDB ID"], r["Chain"]))
         elif bad:
             out.append(_row("zn_coordination_distances", Status.WARNING,
-                            f"{where}: outside {rng[0]}–{rng[1]} Å: " + "; ".join(bad), r["PDB ID"], r["Chain"]))
+                            f"{where}: implausibly short (< {rng[0]} Å): " + "; ".join(bad), r["PDB ID"], r["Chain"]))
         else:
+            note = (f"; long contacts {rng[1]}–cut-off (e.g. second O of a bidentate carboxylate): "
+                    + "; ".join(long_)) if long_ else ""
             out.append(_row("zn_coordination_distances", Status.PASS,
-                            f"{where}: {len(d)} partners within range", r["PDB ID"], r["Chain"]))
+                            f"{where}: {len(d) - len(long_)} donors in {rng[0]}–{rng[1]} Å{note}",
+                            r["PDB ID"], r["Chain"]))
     return out or [_row("zn_coordination_distances", Status.NOT_APPLICABLE, "no Zn in analysed entries")]
 
 

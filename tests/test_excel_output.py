@@ -78,6 +78,17 @@ def test_compare_workbooks_reports_changes(tmp_path):
     assert cell["Key"] == "B" and cell["Old"] == 2.0 and cell["New"] == 2.5
 
 
+def test_compare_ignores_list_order_and_handles_repeated_keys(tmp_path):
+    a = pd.DataFrame({"PDB ID": ["A", "A"], "Component": ["NAG", "NAG"], "Count in ASU": [1, 2],
+                      "Glycans": ["NAG(2), oligosaccharide(3)", "x"]})
+    b = pd.DataFrame({"PDB ID": ["A", "A"], "Component": ["NAG", "NAG"], "Count in ASU": [1, 2],
+                      "Glycans": ["oligosaccharide(3), NAG(2)", "x"]})
+    write_workbook(tmp_path / "a.xlsx", {"Ligands": a}, add_dictionary=False)
+    write_workbook(tmp_path / "b.xlsx", {"Ligands": b}, add_dictionary=False)
+    cmp = compare_workbooks(tmp_path / "a.xlsx", tmp_path / "b.xlsx")
+    assert not (cmp["Kind"] == "values differ").any()
+
+
 def test_dictionary_covers_identifier_columns():
     dd = data_dictionary({"BindingSites": pd.DataFrame(columns=["PDB ID", "Model", "Chain (label)", "Entity",
                                                                  "Residue no.", "Calculation status"])})

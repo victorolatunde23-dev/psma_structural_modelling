@@ -62,6 +62,17 @@ across a cell edge.
   - `Donor coordination number`;
   - `Donor atoms (N/O/S: Å)`, with alternate locations marked.
 
+### First full run in Colab (90 entries): comparison with the original notebook
+
+All differences were traced to these causes:
+
+1. **The `mark.x` bug was fixed.** BindingSites (474 rows), Glycosylation (642) and LidVsLigand are now filled, and the bug message is gone from Summary → Warnings in all 90 entries.
+2. **SIFTS mappings came back for 3BXM, 9HLW and 9HVL.** The original run cached an empty PDBe answer for these entries; refetching recovered the mappings. Five chains gain UniProt numbering, active-site, lid and variability rows, and 3BXM's E424A mutation is now detected. Ranking scores shift slightly as a knock-on effect, because ranks are relative.
+3. **2XEG is now the open-lid calibration.** It supplies the reference vote that was missing before: 5 lids change from ambiguous to open, and lid confidences and votes change accordingly. PC1 scores change because the PCA is refitted with the 5 extra chains.
+4. **E424 mutants** are excluded from the active-site mean normalised B (15 entries).
+5. **List order is now deterministic.** Summary lists (ligands, glycans, additives) are sorted alphabetically; RCSB had returned entities in a different order between runs. `compare_workbooks` now ignores list order and matches repeated keys by occurrence.
+6. **Zn check.** Donors between 2.6 Å and the 2.8 Å cut-off are reported as long contacts (PASS), typically the second oxygen of bidentate D453. Distances below 1.8 Å are flagged as implausible.
+
 ### Added columns
 - **Summary:**
   - `Assembly choice reason`, `Assembly copies source`, `RCSB assembly chain count`
