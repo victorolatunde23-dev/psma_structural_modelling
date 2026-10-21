@@ -124,7 +124,7 @@ def coordinate_analysis(st: Any, target_entity_ids: set[str], model_index: int =
     target_subs = {s for s, e in ent_of_sub.items() if e in target_entity_ids}
 
     def _assembly(assembly_id: str):
-        return next((a for a in st.assemblies if a.name == assembly_id), None)
+        return next((a for a in st.assemblies if str(a.name).strip() == str(assembly_id).strip()), None)
 
     def expand(assembly_id: str) -> tuple[int | None, Counter | None]:
         """Copies of the target and het-residue counts in an assembly."""
@@ -158,6 +158,7 @@ def coordinate_analysis(st: Any, target_entity_ids: set[str], model_index: int =
         "auth_of_sub": auth_of_sub, "target_subs": target_subs,
         "asu_het": asu_het, "expand": expand, "count_subs": count_subs,
         "st": st, "model": model, "model_number": model_index + 1,
+        "assembly_names": [str(a.name) for a in st.assemblies],
     }
 
 

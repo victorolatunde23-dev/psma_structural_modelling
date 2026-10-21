@@ -186,6 +186,9 @@ def process_entry(pdb: str, e: dict, sifts: dict, cfg: Config, useq: str,
 
     asm_id = (chosen or {}).get("pdbx_struct_assembly", {}).get("id")
     asm_copies, asm_het = (coords["expand"](asm_id) if coords and asm_id else (None, None))
+    if coords and asm_id and asm_copies is None:
+        warnings.append(f"assembly {asm_id} not found in mmCIF (gemmi assemblies: "
+                        f"{coords.get('assembly_names') or 'none'}); copies taken from RCSB if possible")
     copies_source = "gemmi generators" if asm_copies is not None else ""
     if asm_copies is None and chosen and len(e.get("polymer_entities") or []) == 1:
         # Fallback without coordinates: homomeric entry -> chain count = copies

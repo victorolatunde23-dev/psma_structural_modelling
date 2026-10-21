@@ -92,7 +92,7 @@ def test_zinc_coordination_and_contacts(ctx):
                                  cfg.require("contacts"), F.USEQ)
     assert [r["Component"] for r in rows] == ["ZN"]          # glycan and water are not binding-site rows
     zn = rows[0]
-    assert zn["Protein residues (UniProt/chain)"] == "H377/A, D387/A"
+    assert zn["Protein residues (UniProt/chain)"] == "D387/A, H377/A"   # original ordering: by chain, then text
     dist = dict(coordination_distances(zn))
     assert dist["H377/A NE2"] == pytest.approx(2.05, abs=0.01)
     assert dist["D387/A OD1"] == pytest.approx(2.10, abs=0.01)
