@@ -22,3 +22,18 @@ def test_calibration_structures_end_to_end(tmp_path):
     assert (s["Monomer / dimer"] == "dimer").all()          # PSMA is a homodimer
     sanity = run_sanity_checks(res.tables, cfg)
     assert critical_failures(sanity).empty, critical_failures(sanity).to_string()
+
+
+@pytest.mark.network
+def test_assessment_on_real_entries(tmp_path):
+    """3BHX (author dimer) defines the canonical interface; 4P44 (software-only monomer)
+    should contain that dimer in its crystal lattice."""
+    pytest.importorskip("gemmi")
+    from psma_pipeline.assessment import run_assessment
+    from psma_pipeline.survey import run_survey
+    cfg = load_config(overrides={"paths": {"outputs": str(tmp_path)}})
+    surv = run_survey(cfg, ids=["3BHX", "4P44"])
+    res = run_assessment(cfg, surv.tables)
+    s = res.tables["AssessmentSummary"].set_index("PDB ID")
+    assert s.loc["3BHX", "Dimer interface area (Å²)"] > 500
+    assert str(s.loc["4P44", "Canonical dimer in crystal lattice"]) not in ("", "nan", "None")

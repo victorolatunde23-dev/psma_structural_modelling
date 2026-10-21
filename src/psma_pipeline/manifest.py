@@ -35,8 +35,13 @@ METHOD_VERSIONS = {
     "active_site.active_site_analysis": "1.1 (mutated residues excluded from summaries)",
     "conformations.lid_conformation": "1.0",
     "conformations.structural_variability": "1.0",
-    "ranking.rank_templates": "1.0 (global mode = original ranking)",
-    "sanity.run_sanity_checks": "1.0",
+    "sanity.run_sanity_checks": "1.1 (Zn long contacts; offset-based numbering check)",
+    "interfaces.analyse_interface": "1.0",
+    "interfaces.lattice_interfaces": "1.0",
+    "interfaces.compare_interfaces": "1.0 (consensus canonical set)",
+    "sasa.buried_surface": "1.0",
+    "local_fit.categorise": "1.0 (X-ray RSCC/RSRZ; EM Q vs Pintilie 2020 expectation)",
+    "ranking.rank_templates": "1.1 (exclude = any condition; empty filter)",
 }
 
 PYTHON_PACKAGES = {

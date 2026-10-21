@@ -62,6 +62,19 @@ def test_filters_and_audit_columns():
         rank_templates(crit(), {**MODE, "include": {"No such column": 1}})
 
 
+def test_exclude_removes_rows_matching_any_condition():
+    c = crit().assign(**{"Subs": [0, 1, 0], "Fab": [0.0, 0.0, 1.0]})
+    out = rank_templates(c, {**MODE, "exclude": {"Subs": {"min": 1}, "Fab": 1.0}})
+    assert list(out["PDB ID"]) == ["A"]
+    inc = rank_templates(c, {**MODE, "include": {"Subs": 0, "Fab": 0.0}})
+    assert list(inc["PDB ID"]) == ["A"]
+
+
+def test_empty_filter():
+    c = crit().assign(Ligands=["X(1)", "", None])
+    assert set(rank_templates(c, {**MODE, "include": {"Ligands": {"empty": True}}})["PDB ID"]) == {"B", "C"}
+
+
 def test_all_missing_gives_no_score():
     c = crit().assign(**{"Resolution (Å)": None, "Clashscore": None, "Best UniProt coverage": None})
     out = rank_templates(c, MODE)

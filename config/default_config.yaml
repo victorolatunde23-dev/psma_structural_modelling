@@ -26,6 +26,7 @@ paths:                              # relative to the project root unless absolu
 
 outputs:
   survey_workbook: "{accession}_structures.xlsx"
+  assessment_workbook: "{accession}_modelling_assessment.xlsx"
   write_csv: true
   write_parquet: true               # skipped with a warning if pyarrow is missing
   manifest: "{accession}_manifest.json"
@@ -47,10 +48,14 @@ endpoints:
   pdbe_val_percentiles: https://www.ebi.ac.uk/pdbe/api/validation/global-percentiles/entry/{pdb}
   pdbe_val_outliers: https://www.ebi.ac.uk/pdbe/api/validation/residuewise_outlier_summary/entry/{pdb}
   uniprot_json: https://rest.uniprot.org/uniprotkb/{acc}?format=json
+  validation_xml: https://files.rcsb.org/pub/pdb/validation_reports/{mid}/{pdb}/{pdb}_validation.xml.gz
+  validation_xml_fallback: https://www.ebi.ac.uk/pdbe/entry-files/download/{pdb}_validation.xml
+  emdb_entry: https://www.ebi.ac.uk/emdb/api/entry/{emdb}
 
 structure:
   # first = model 1 only (default). all = every model of NMR ensembles
-  # (accepted, but until Milestone 2 it falls back to model 1 with a warning).
+  # (accepted; currently falls back to model 1 with a recorded warning - there
+  # are no NMR entries for Q04609, so this is deferred, see docs/CHECKLIST.md).
   model_policy: first
   # Order in which assemblies are preferred; the first match wins.
   assembly_preference: [author, software, first]
@@ -67,9 +72,13 @@ variability:
   min_common_ca: 50                 # minimum common CA atoms to superpose two chains
 
 ranking:
-  # Each mode: criteria with direction (lower/higher = better), weight and
-  # missing-value policy. Milestone 1 implements the "global" mode, which
-  # reproduces the original equal-weight ranking exactly.
+  # Each mode declares filters, criteria (direction lower|higher, weight) and a
+  # missing-value policy (ignore = average over the criteria an entry has;
+  # worst = a missing value counts as the worst rank). Filters:
+  #   {column: value} | {column: [values]} | {column: {min: x, max: y}}
+  #   {column: {contains: "text"}} | {column: {empty: true|false}}
+  # "global" reproduces the original ranking exactly. Columns marked (M2) are
+  # produced by notebook 02 (modelling assessment).
   modes:
     global:
       description: Global homology-modelling template (original ranking)
@@ -82,7 +91,143 @@ ranking:
         - {column: "Fewest internal missing",   direction: lower,  weight: 1}
         - {column: "Best UniProt coverage",     direction: higher, weight: 1}
         - {column: "Active-site completeness",  direction: higher, weight: 1}
-      missing: ignore               # ignore = average over available criteria
+      missing: ignore
+    active_site:
+      description: Active-site modelling template (wild-type active site, well supported)
+      include: {}
+      exclude: {"Active-site residues differing from UniProt": {empty: false}}
+      criteria:
+        - {column: "Active-site completeness",        direction: higher, weight: 2}
+        - {column: "Active-site local support score", direction: higher, weight: 2}   # (M2)
+        - {column: "Active-site mean normalised B",   direction: lower,  weight: 1}
+        - {column: "Zn site complete",                direction: higher, weight: 1}   # (M2)
+        - {column: "Resolution (Å)",                  direction: lower,  weight: 1}
+        - {column: "Clashscore",                      direction: lower,  weight: 1}
+      missing: worst
+    ligand_bound:
+      description: Ligand-bound template (ligand-conditioned ranking follows in Milestone 3)
+      include: {"Ligands of interest": {empty: false}}
+      exclude: {}
+      criteria:
+        - {column: "Ligand local support score",      direction: higher, weight: 2}   # (M2)
+        - {column: "Max ligand B ratio",              direction: lower,  weight: 1}
+        - {column: "Active-site completeness",        direction: higher, weight: 1}
+        - {column: "Resolution (Å)",                  direction: lower,  weight: 1}
+        - {column: "Clashscore",                      direction: lower,  weight: 1}
+      missing: worst
+    apo:
+      description: Apo-state template (no ligand of interest)
+      include: {"Ligands of interest": {empty: true}}
+      exclude: {}
+      criteria:
+        - {column: "Resolution (Å)",            direction: lower,  weight: 1}
+        - {column: "Clashscore",                direction: lower,  weight: 1}
+        - {column: "Fewest internal missing",   direction: lower,  weight: 1}
+        - {column: "Active-site completeness",  direction: higher, weight: 1}
+      missing: ignore
+    open_lid:
+      description: Open entrance-lid template
+      include: {"Entrance lid state": "open"}
+      exclude: {}
+      criteria:
+        - {column: "Entrance-lid local support score", direction: higher, weight: 2}   # (M2)
+        - {column: "Resolution (Å)",            direction: lower,  weight: 1}
+        - {column: "Clashscore",                direction: lower,  weight: 1}
+        - {column: "Active-site completeness",  direction: higher, weight: 1}
+      missing: worst
+    closed_lid:
+      description: Closed entrance-lid template
+      include: {"Entrance lid state": "closed"}
+      exclude: {}
+      criteria:
+        - {column: "Entrance-lid local support score", direction: higher, weight: 2}   # (M2)
+        - {column: "Resolution (Å)",            direction: lower,  weight: 1}
+        - {column: "Clashscore",                direction: lower,  weight: 1}
+        - {column: "Active-site completeness",  direction: higher, weight: 1}
+      missing: worst
+    dimer_interface:
+      description: Dimer-interface template (canonical, complete, well supported interface)
+      include: {"Monomer / dimer": "dimer"}
+      exclude: {"Noncanonical interface flag": true}
+      criteria:
+        - {column: "Canonical interface similarity", direction: higher, weight: 2}   # (M2)
+        - {column: "Interface complete",             direction: higher, weight: 2}   # (M2)
+        - {column: "Interface local support score",  direction: higher, weight: 1}   # (M2)
+        - {column: "Resolution (Å)",                 direction: lower,  weight: 1}
+        - {column: "Clashscore",                     direction: lower,  weight: 1}
+      missing: worst
+    md_start:
+      description: MD starting structure (wild type, complete, no antibody chains)
+      include: {"Monomer / dimer": "dimer"}
+      exclude: {"N substitutions vs UniProt": {min: 1}, "Has other polymer chains": true}
+      criteria:
+        - {column: "Fewest internal missing",   direction: lower,  weight: 2}
+        - {column: "Best UniProt coverage",     direction: higher, weight: 1}
+        - {column: "Active-site completeness",  direction: higher, weight: 1}
+        - {column: "Interface complete",        direction: higher, weight: 1}   # (M2)
+        - {column: "Zn site complete",          direction: higher, weight: 1}   # (M2)
+        - {column: "Resolution (Å)",            direction: lower,  weight: 1}
+        - {column: "Clashscore",                direction: lower,  weight: 1}
+      missing: worst
+    glycosylated:
+      description: Glycosylated structural template (most observed N-glycan sites)
+      include: {}
+      exclude: {}
+      criteria:
+        - {column: "Glycosylated Asn count",    direction: higher, weight: 2}   # (M2)
+        - {column: "Resolution (Å)",            direction: lower,  weight: 1}
+        - {column: "Clashscore",                direction: lower,  weight: 1}
+      missing: worst
+    cryoem_reference:
+      description: Cryo-EM / reference-comparison template
+      include: {"Method": {contains: "ELECTRON"}}
+      exclude: {}
+      criteria:
+        - {column: "EM Q-score",                direction: higher, weight: 2}   # (M2)
+        - {column: "Resolution (Å)",            direction: lower,  weight: 1}
+        - {column: "Clashscore",                direction: lower,  weight: 1}
+      missing: worst
+
+interfaces:
+  contact_cutoff: 4.0           # Å, heavy-atom contact defining interface residues
+  hbond_max: 3.5                # Å, N/O donor–acceptor (distance-only; no angles)
+  salt_bridge_max: 4.0          # Å, acidic O – basic N
+  salt_bridge_include_his: false
+  hydrophobic_max: 4.5          # Å, C–C between hydrophobic side chains
+  aromatic_centroid_max: 6.5    # Å, ring-centroid distance (Phe/Tyr/Trp[/His])
+  neighbourhood: 8.0            # Å, glycans / ligands / ions reported "near" the interface
+  sasa:
+    method: auto                # auto (FreeSASA if installed, else shrake_rupley) | freesasa | shrake_rupley
+    probe: 1.4                  # Å
+    n_points: 100               # Shrake–Rupley points per atom
+  altloc: first                 # keep the first alternate location of each atom
+  canonical:
+    min_fraction: 0.5           # residue/contact present in >= this fraction of author-defined dimer interfaces
+    noncanonical_jaccard: 0.3   # below this Jaccard to the canonical set -> noncanonical
+    min_bsa_fraction: 0.5       # BSA below this fraction of the canonical median -> flagged
+  clustering:
+    method: average             # scipy hierarchical linkage
+    distance_threshold: 0.5     # 1 - Jaccard
+  lattice:
+    enabled: true               # search crystal contacts for the canonical dimer (e.g. monomeric assemblies)
+    ca_prefilter: 12.0          # Å
+    max_cell_shift: 1           # lattice translations -1..+1 in each direction
+    canonical_match_jaccard: 0.5   # lattice interface counts as the canonical dimer at/above this Jaccard
+
+local_fit:
+  # Method-specific rules; categories are only combined AFTER these rules.
+  xray:                         # per-residue RSCC (higher better) and RSRZ (lower better)
+    strong:     {rscc_min: 0.90, rsrz_max: 2.0}
+    acceptable: {rscc_min: 0.80, rsrz_max: 3.0}
+  em:                           # per-residue Q-score relative to the value expected at the map resolution
+    # expected Q = slope * resolution + intercept (Pintilie et al. 2020, Nat Methods 17:328)
+    expected_q_slope: -0.1775
+    expected_q_intercept: 1.1192
+    strong_delta: 0.0           # Q >= expected + delta
+    acceptable_delta: -0.15     # Q >= expected + delta
+  scores: {strong local support: 3, acceptable local support: 2, weak local support: 1,
+           unsupported or unavailable: 0}
+  group_summary: median         # median | min : residue-group category uses this statistic
 
 sanity:
   zn_ligand_distance_range: [1.8, 2.6]   # Å; Zn–N/O/S first-shell distances

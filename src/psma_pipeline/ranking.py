@@ -2,7 +2,9 @@
 
 A ranking *mode* (``ranking.modes.<name>`` in the config) declares:
 
-* ``include`` / ``exclude`` filters  – ``{column: value | [values] | {min: x, max: y}}``;
+* ``include`` / ``exclude`` filters  – ``{column: value | [values] | {min: x, max: y} |
+  {contains: text} | {empty: bool}}``; include keeps rows matching ALL
+  conditions, exclude removes rows matching ANY condition;
 * ``criteria`` – list of ``{column, direction: lower|higher, weight}``;
 * ``missing`` – ``ignore`` (average over the criteria an entry has) or
   ``worst`` (a missing value counts as the worst rank).
@@ -53,9 +55,11 @@ def criteria_table(df_summary: pd.DataFrame, df_chains: pd.DataFrame,
 
 
 def _apply_filter(df: pd.DataFrame, spec: dict, keep: bool) -> pd.DataFrame:
+    """``keep=True`` (include): rows matching ALL conditions are kept.
+    ``keep=False`` (exclude): rows matching ANY condition are removed."""
     if not spec:
         return df
-    mask = pd.Series(True, index=df.index)
+    mask = pd.Series(keep, index=df.index)
     for col, cond in spec.items():
         if col not in df:
             raise KeyError(f"ranking filter refers to unknown column {col!r}")
@@ -69,11 +73,15 @@ def _apply_filter(df: pd.DataFrame, spec: dict, keep: bool) -> pd.DataFrame:
                 m &= num <= cond["max"]
             if "contains" in cond:
                 m &= v.astype(str).str.contains(str(cond["contains"]), case=False, na=False)
+            if "empty" in cond:
+                blank = v.isna() | (v.astype(str).str.strip().isin(["", "nan", "None"]))
+                m &= blank if cond["empty"] else ~blank
         elif isinstance(cond, list):
             m = v.isin(cond)
         else:
             m = v == cond
-        mask &= m.fillna(False)
+        m = m.fillna(False).astype(bool)
+        mask = (mask & m) if keep else (mask | m)
     return df[mask] if keep else df[~mask]
 
 

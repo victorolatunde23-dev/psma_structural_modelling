@@ -10,7 +10,7 @@ so the core workflow can be reused for another UniProt accession.
 
 ## Status
 
-**Milestone 1 of 7 is complete:** the original survey notebook has been
+**Milestones 1–2 of 7 are complete.** Milestone 1: the original survey notebook has been
 refactored into an importable package, with configuration, tests, sanity
 checks and a reproducibility manifest. See [`docs/CHECKLIST.md`](docs/CHECKLIST.md)
 for every component and [`docs/PLAN.md`](docs/PLAN.md) for the full plan.
@@ -18,7 +18,7 @@ for every component and [`docs/PLAN.md`](docs/PLAN.md) for the full plan.
 | Notebook | Purpose | Milestone |
 |---|---|---|
 | `01_structure_survey.ipynb` | PDB survey, cross-check, assemblies, ligands, validation, lid states, template ranking | **M1 ✔** |
-| `02_interface_pocket_validation.ipynb` | dimer interfaces, pocket fingerprints, local map-model fit, conserved waters, variants | M2–M3 |
+| `02_interface_pocket_validation.ipynb` | dimer interfaces, crystal contacts, local map-model fit, ranking modes (**M2 ✔**); pocket fingerprints, conserved waters, variants (M3) | M2–M3 |
 | `03_alphafold_comparison.ipynb` | AlphaFold / ColabFold monomer and multimer assessment | M4 |
 | `04_model_preparation.ipynb` | repairs, protonation, Zn site, ligands, glycans, construct context | M5 |
 | `05_md_system_setup.ipynb` | force fields, parameter provenance, solvation, MD readiness | M6 |
@@ -57,8 +57,9 @@ src/psma_pipeline/
   config.py   status.py   cache.py   rcsb.py   pdbe.py   uniprot.py   numbering.py
   assemblies.py   ligands.py   pockets.py   glycans.py   active_site.py   conformations.py
   validation.py   ranking.py   survey.py   sanity.py   manifest.py   excel_output.py
+  structure_atoms.py   sasa.py   interfaces.py   local_fit.py   assessment.py   (M2)
 notebooks/    one notebook per stage (explanation + plots; no calculations)
-scripts/      run_survey.py (command-line equivalent of notebook 01)
+scripts/      run_survey.py, run_assessment.py (command-line equivalents of notebooks 01 and 02)
 tests/        pytest suite (offline; gemmi tests skip without gemmi; network tests opt-in)
 docs/         PLAN.md, CHECKLIST.md, CHANGES.md
 data/ cache/ outputs/   (contents not tracked)

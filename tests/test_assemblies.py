@@ -156,3 +156,31 @@ def test_gemmi_assembly_expansion_counts_symmetry_generated_dimer():
     assert info["expand"]("99") == (None, None)      # unknown assembly is reported, not guessed
     assert info["model_number"] == 1
     assert info["assembly_names"] == ["1"]
+
+
+def test_gemmi_atom_table_assembly_operators_and_lattice():
+    """atoms_from_gemmi + assembly_generators + build_assembly keep identifiers and UniProt numbers."""
+    gemmi = pytest.importorskip("gemmi")
+    import numpy as np
+    from psma_pipeline.structure_atoms import (assembly_generators, atoms_from_gemmi, build_assembly,
+                                               lattice_operators, target_protomers)
+
+    st = gemmi.make_structure_from_block(gemmi.cif.read_string(MMCIF_ASU_MONOMER).sole_block())
+    st.setup_entities()
+    segs = {"A": [{"entity_id": "1", "chain_id": "A", "seq_start": 1, "seq_end": 4, "unp_start": 376, "unp_end": 379}]}
+    atoms = atoms_from_gemmi(st, 0, segs, {"1"})
+    assert set(atoms["label_asym"]) == {"A", "B"}
+    his = atoms[(atoms["resname"] == "HIS") & (atoms["atom"] == "NE2")].iloc[0]
+    assert his["unp"] == 377 and his["resnum"] == 377 and his["label_seq"] == 2 and bool(his["target"])
+    assert not atoms[atoms["label_asym"] == "B"]["target"].any()
+    gens = assembly_generators(st, "1")
+    assert len(gens) == 1 and sorted(gens[0][0]) == ["A", "B"] and len(gens[0][1]) == 2
+    assert np.allclose(gens[0][1][1].R, np.diag([-1, -1, 1]))
+    asm = build_assembly(atoms, gens)
+    assert target_protomers(asm) == ["A|1", "A|2"]
+    assert set(asm[asm["protomer"] == "A|2"]["unp"].dropna()) == {377.0, 378.0}   # numbering survives the copy
+    assert assembly_generators(st, "99") is None
+    ops = lattice_operators(st, 1)
+    assert len(ops) == 27 and ops[0].name == "1_555" and ops[0].is_identity
+    shift = next(o for o in ops if o.name == "1_655")
+    assert np.allclose(shift.t, [100, 0, 0]) and np.allclose(shift.R, np.eye(3))

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import pandas as pd
 
@@ -386,3 +386,53 @@ def validation_ids(selection: pd.DataFrame, meta: dict) -> list[str]:
 
 __all__: list[Any] = ["run_sanity_checks", "critical_failures", "sanity_overview",
                       "select_validation_set", "validation_ids", "entry_features"]
+
+
+# ---------------------------------------------------------------------------
+# Milestone 2: assessment checks
+# ---------------------------------------------------------------------------
+def run_assessment_checks(tables: dict[str, pd.DataFrame], summary: pd.DataFrame,
+                          critical: Iterable[str] = ("dimer_interface_present", "canonical_interface_defined")
+                          ) -> pd.DataFrame:
+    """Sanity checks on the modelling-assessment tables (brief §20 examples).
+
+    * dimer_interface_present – every entry whose assembly is a dimer has an
+      interface with contacts (a dimer with zero interface contacts = FAIL);
+    * bsa_positive – no negative or zero BSA on contacting interfaces;
+    * canonical_interface_defined – the canonical residue set is not empty;
+    * unsupported_ligand_not_strong – a ligand without a metric is never
+      'strong'/'acceptable';
+    * em_metrics_only_for_em – EMMapFit rows only for cryo-EM entries.
+    """
+    from .local_fit import NONE
+    rows: list[dict] = []
+    ifs = tables.get("Interfaces", pd.DataFrame())
+    dimers = summary[summary.get("Monomer / dimer", pd.Series(dtype=str)) == "dimer"]["PDB ID"]
+    have = set(ifs[ifs.get("Residue contacts", pd.Series(dtype=float)).fillna(0) > 0]["PDB ID"]) if len(ifs) else set()
+    for p in dimers:
+        rows.append(_row("dimer_interface_present", Status.PASS if p in have else Status.FAIL,
+                         "interface with contacts" if p in have else "dimer assembly without interface contacts", p))
+    if len(ifs) and "BSA total (Å²)" in ifs:
+        bad = ifs[(ifs["Residue contacts"].fillna(0) > 0) & ~(pd.to_numeric(ifs["BSA total (Å²)"], errors="coerce") > 0)]
+        rows.append(_row("bsa_positive", Status.FAIL if len(bad) else Status.PASS,
+                         ", ".join(bad["Interface ID"]) if len(bad) else "all contacting interfaces bury surface"))
+    can = tables.get("CanonicalInterface", pd.DataFrame())
+    can_res = can.set_index("Item")["Value"].get("canonical residues") if len(can) else None
+    rows.append(_row("canonical_interface_defined", Status.PASS if can_res else Status.FAIL,
+                     f"{len(str(can_res).split(', '))} residues" if can_res else "no canonical interface"))
+    lig = tables.get("LigandModelFit", pd.DataFrame())
+    if len(lig):
+        nometric = lig[lig[["RSCC", "Q-score"]].isna().all(axis=1)]
+        wrong = nometric[nometric["Local support"] != NONE]
+        rows.append(_row("unsupported_ligand_not_strong", Status.FAIL if len(wrong) else Status.PASS,
+                         f"{len(wrong)} ligands without metric labelled supported" if len(wrong)
+                         else f"{len(nometric)} ligands without metric, all 'unsupported or unavailable'"))
+    em = tables.get("EMMapFit", pd.DataFrame())
+    if len(em):
+        meth = summary.set_index("PDB ID")["Method"]
+        notem = [p for p in em["PDB ID"] if "ELECTRON" not in str(meth.get(p, ""))]
+        rows.append(_row("em_metrics_only_for_em", Status.FAIL if notem else Status.PASS,
+                         ", ".join(notem) or "EM metrics only for cryo-EM entries"))
+    df = pd.DataFrame(rows)
+    df.insert(1, "Critical", df["Check"].isin(set(critical)))
+    return df

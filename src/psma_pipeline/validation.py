@@ -12,6 +12,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import requests
 
 from .cache import cached_json
@@ -134,3 +135,109 @@ def pdbe_validation(sess: requests.Session, pdb: str, cache: Path, url_percentil
                            (r.get("author_insertion_code") or "").strip())
                     outliers[key].update(r.get("outlier_types") or [])
     return pct, outliers
+
+
+# ---------------------------------------------------------------------------
+# wwPDB validation XML (Milestone 2)
+# ---------------------------------------------------------------------------
+RESIDUE_NUMERIC = ["rscc", "rsrz", "rsr", "owab", "avgoccu", "Q_score", "residue_inclusion", "NatomsEDS",
+                   "EDIAm", "OPIA"]
+CHILD_COUNTS = {"clash": "n_clashes", "bond-outlier": "n_bond_outliers", "angle-outlier": "n_angle_outliers",
+                "chiral-outlier": "n_chiral_outliers", "plane-outlier": "n_plane_outliers",
+                "mog-bond-outlier": "n_mogul_bond_outliers", "mog-angle-outlier": "n_mogul_angle_outliers",
+                "mog-torsion-outlier": "n_mogul_torsion_outliers", "mog-ring-outlier": "n_mogul_ring_outliers",
+                "symm-clash": "n_symm_clashes"}
+
+
+def validation_xml_url(pdb: str, template: str) -> str:
+    """Fill ``{pdb}`` (lower case) and ``{mid}`` (characters 2-3) in a URL template."""
+    p = pdb.lower()
+    return template.format(pdb=p, mid=p[1:3])
+
+
+def fetch_validation_xml(sess: requests.Session, pdb: str, cache: Path, url_template: str,
+                         fallback_template: str | None = None, **http: Any) -> Path:
+    """Download (or reuse) the wwPDB validation XML; tries the fallback URL on failure.
+
+    Raises
+    ------
+    FetchError
+        If neither source provides the file.
+    """
+    from .cache import FetchError, cached_download
+    folder = cache / "validation_xml"
+    errors = []
+    for tmpl in [url_template] + ([fallback_template] if fallback_template else []):
+        url = validation_xml_url(pdb, tmpl)
+        path = folder / (f"{pdb.upper()}_validation.xml" + (".gz" if url.endswith(".gz") else ""))
+        try:
+            return cached_download(sess, url, path, **http)
+        except FetchError as ex:
+            errors.append(str(ex))
+    raise FetchError("; ".join(errors))
+
+
+def _num(v: Any) -> float | None:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_validation_xml(path: Path) -> dict:
+    """Parse a wwPDB validation report (any schema version).
+
+    Returns
+    -------
+    dict
+        ``schema`` (schema file name from the root element, or "unknown"),
+        ``entry`` (all Entry attributes as strings), ``residues`` (DataFrame,
+        one row per ModelledSubgroup, with numeric metrics where present and
+        counts of outlier child elements), ``status`` and ``note``.
+        Attributes absent from a given schema version are simply missing.
+    """
+    import gzip
+    import xml.etree.ElementTree as ET
+
+    opener = gzip.open if str(path).endswith(".gz") else open
+    rows: list[dict] = []
+    entry: dict[str, str] = {}
+    schema = "unknown"
+    with opener(path, "rb") as fh:
+        for event, el in ET.iterparse(fh, events=("start", "end")):
+            tag = el.tag.split("}")[-1]
+            if event == "start" and tag == "wwPDB-validation-information":
+                for k, v in el.attrib.items():
+                    if k.endswith("noNamespaceSchemaLocation"):
+                        schema = v.rsplit("/", 1)[-1]
+            elif event == "end" and tag == "Entry":
+                entry = dict(el.attrib)
+                el.clear()
+            elif event == "end" and tag == "ModelledSubgroup":
+                a = el.attrib
+                row: dict[str, Any] = {
+                    "model": int(a.get("model", 1) or 1), "chain": a.get("chain"),
+                    "resnum": int(a["resnum"]) if str(a.get("resnum", "")).lstrip("-").isdigit() else None,
+                    "icode": (a.get("icode") or "").strip(), "resname": a.get("resname"),
+                    "label_asym": a.get("said"), "entity": a.get("ent"),
+                    "label_seq": int(a["seq"]) if str(a.get("seq", "")).isdigit() else None,
+                    "altcode": (a.get("altcode") or "").strip(),
+                    "rama": a.get("rama"), "rota": a.get("rota"),
+                }
+                for k in RESIDUE_NUMERIC:
+                    row[k] = _num(a.get(k))
+                for k, v in a.items():
+                    if "rmsz" in k.lower() or "mogul" in k.lower():
+                        row[k] = _num(v)
+                counts = dict.fromkeys(CHILD_COUNTS.values(), 0)
+                for child in el:
+                    ct = child.tag.split("}")[-1]
+                    if ct in CHILD_COUNTS:
+                        counts[CHILD_COUNTS[ct]] += 1
+                row.update(counts)
+                rows.append(row)
+                el.clear()
+    df = pd.DataFrame(rows)
+    note = "" if len(df) else "no ModelledSubgroup elements"
+    return {"schema": schema, "entry": entry, "residues": df,
+            "status": "OK" if len(df) else "WARNING", "note": note}

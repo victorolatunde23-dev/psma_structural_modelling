@@ -166,3 +166,47 @@ def pdbe_validation(pid: str) -> tuple[dict, dict]:
     pct = {"2BBB": {"PDBe clashscore": 4.5, "PDBe clashscore percentile (vs similar resolution)": 80,
                     "PDBe clashscore percentile (whole PDB)": 70}}.get(pid, {})
     return pct, {}
+
+
+# ---------------------------------------------------------------------------
+# Synthetic dimer (numpy atom tables) for interface / assessment tests
+# ---------------------------------------------------------------------------
+TOY_RESNAMES = ["LEU", "ASP", "ALA", "LYS", "PHE", "SER", "ILE", "GLU", "VAL", "ARG"]
+
+
+def toy_chain_atoms(chain: str = "A", label: str = "A", first: int = 44, n: int = 100, entity: str = "1"):
+    """A helical poly-peptide (N, CA, C, O, CB, CG) along z, UniProt = author numbering."""
+    import numpy as np
+    import pandas as pd
+    rows = []
+    for k in range(n):
+        num = first + k
+        ang = np.radians(100 * k)
+        rad = np.array([np.cos(ang), np.sin(ang), 0.0])
+        ca = np.array([2.3 * np.cos(ang), 2.3 * np.sin(ang), 1.5 * k])
+        rn = TOY_RESNAMES[k % len(TOY_RESNAMES)]
+        side = {"LEU": ("CG", "C"), "ASP": ("OD1", "O"), "ALA": None, "LYS": ("NZ", "N"), "PHE": ("CG", "C"),
+                "SER": ("OG", "O"), "ILE": ("CG1", "C"), "GLU": ("OE1", "O"), "VAL": ("CG1", "C"), "ARG": ("NH1", "N")}[rn]
+        atoms = [("N", "N", ca + [0, 0, -1.0]), ("CA", "C", ca), ("C", "C", ca + [0, 0, 1.0]),
+                 ("O", "O", ca + [0.3, 0, 1.4]), ("CB", "C", ca + 1.5 * rad)]
+        if side:
+            atoms.append((side[0], side[1], ca + 3.0 * rad))
+        for name, el, xyz in atoms:
+            rows.append(dict(chain=chain, label_asym=label, entity=entity, resname=rn, resnum=num, icode="",
+                             label_seq=k + 1, unp=float(num), atom=name, element=el, altloc="",
+                             x=xyz[0], y=xyz[1], z=xyz[2], b=20.0 + (k % 7), occ=1.0, polymer=True,
+                             water=False, target=True))
+    return pd.DataFrame(rows)
+
+
+def twofold(offset: float = 9.0, name: str = "2"):
+    """Two-fold about the axis x = offset/2, y = 0 (parallel to z)."""
+    import numpy as np
+    from psma_pipeline.structure_atoms import Operator
+    return Operator(name, np.diag([-1.0, -1.0, 1.0]), np.array([offset, 0.0, 0.0]))
+
+
+def identity_op(name: str = "1"):
+    import numpy as np
+    from psma_pipeline.structure_atoms import Operator
+    return Operator(name, np.eye(3), np.zeros(3))

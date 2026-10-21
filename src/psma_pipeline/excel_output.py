@@ -115,7 +115,7 @@ _DICT: list[tuple[str, str, str, str, str]] = [
     # ---- Ligands -------------------------------------------------------------------------
     ("Ligands", r"Component", "PDB chemical component ID", "", ""),
     ("Ligands", r"Name", "Component name", "", ""),
-    ("Ligands|BindingSites", r"Class", "ion of interest / glycan / additive / buffer / ligand of interest", "", ""),
+    ("Ligands|BindingSites|LigandModelFit", r"Class", "ion of interest / glycan / additive / buffer / ligand of interest", "", ""),
     ("Ligands", r"Count in ASU", "Instances in the asymmetric unit", "count", ""),
     ("Ligands", r"Count in assembly", "Instances in the chosen assembly", "count", ""),
     ("Ligands", r"Assembly", "Assembly ID used for the assembly count", "", ""),
@@ -216,6 +216,109 @@ _DICT: list[tuple[str, str, str, str, str]] = [
     ("CrossCheck", r"PDBe chains \(UniProt range\)", "PDBe chain = UniProt range", "", "author / UniProt"),
     ("CrossCheck", r"UniProt chains", "UniProt cross-reference chains and ranges", "", "UniProt"),
     ("CrossCheck", r"Flags", "Discrepancies between sources ('consistent' if none)", "", ""),
+    # ---- Milestone 2: interfaces ------------------------------------------------------------------
+    ("Interfaces|CrystalContacts|InterfaceContacts", r"Source", "biological assembly or crystal lattice", "", ""),
+    ("Interfaces|CrystalContacts", r"Assembly", "Assembly analysed (ASU if the assembly was unavailable)", "", ""),
+    ("Interfaces|CrystalContacts|InterfaceContacts", r"Protomer [12]", "Protomer: <label_asym>|<operator> in the assembly / lattice", "", "label"),
+    ("Interfaces|CrystalContacts|InterfaceContacts", r"Chain [12]", "Author chain of the protomer", "", "author"),
+    ("Interfaces|CrystalContacts", r"Chain \(label\) [12]", "label_asym_id of the protomer", "", "label"),
+    ("Interfaces|CrystalContacts", r"Copy [12]", "Assembly / lattice operator generating the protomer", "", ""),
+    ("Interfaces|CrystalContacts|InterfaceContacts", r"Interface ID", "<PDB>:<protomer 1>-<protomer 2> (lattice interfaces marked 'lattice')", "", ""),
+    ("Interfaces|CrystalContacts", r"Atom contacts", "Inter-protomer heavy-atom pairs within the contact cut-off", "count", ""),
+    ("Interfaces|CrystalContacts", r"Residue contacts", "Inter-protomer residue pairs in contact", "count", ""),
+    ("Interfaces|CrystalContacts", r"Interface residues [12] \(UniProt\)", "Interface residues of the protomer", "", "UniProt"),
+    ("Interfaces|CrystalContacts", r"N interface residues [12]", "Interface residues of the protomer", "count", ""),
+    ("Interfaces|CrystalContacts|Summary", r"Interface residue count", "Distinct UniProt residues in the interface (both protomers, homodimer union)", "count", "UniProt"),
+    ("Interfaces|CrystalContacts", r"Non-UniProt interface residues", "Contacting residues without a SIFTS mapping (tags), kept apart", "count", ""),
+    ("Interfaces|CrystalContacts", r"H-bonds \(distance-based\)", "Donor–acceptor N/O pairs within hbond_max (no angle criterion)", "count", ""),
+    ("Interfaces|CrystalContacts", r"Salt bridges", "Acidic O – basic N pairs within salt_bridge_max", "count", ""),
+    ("Interfaces|CrystalContacts", r"Hydrophobic contacts", "Hydrophobic side-chain C–C pairs within hydrophobic_max", "count", ""),
+    ("Interfaces|CrystalContacts", r"Aromatic contacts", "Aromatic ring pairs with centroids within aromatic_centroid_max", "count", ""),
+    ("Interfaces|CrystalContacts", r"BSA total \(Å²\)", "SASA(1) + SASA(2) − SASA(complex), protein heavy atoms", "Å²", ""),
+    ("Interfaces|CrystalContacts", r"BSA protomer [12] \(Å²\)", "Surface of this protomer buried by the partner", "Å²", ""),
+    ("Interfaces|CrystalContacts|Summary", r"Dimer interface area \(Å²\)", "Interface area = BSA total / 2", "Å²", ""),
+    ("Interfaces|CrystalContacts", r"SASA protomer [12] \(Å²\)", "SASA of the isolated protomer", "Å²", ""),
+    ("Interfaces|CrystalContacts", r"Fraction buried [12]", "BSA of the protomer / its SASA", "fraction", ""),
+    ("Interfaces|CrystalContacts", r"(Non-)?[Pp]olar fraction of BSA", "Share of BSA from N/O (polar) or C (non-polar) atoms", "fraction", ""),
+    ("Interfaces|CrystalContacts", r"SASA method", "freesasa or shrake_rupley (numpy fallback)", "", ""),
+    ("Interfaces|CrystalContacts", r"Interface (mean|max) normalised B", "Within-chain B z-score of interface residues", "z", ""),
+    ("Interfaces|CrystalContacts", r"Validation outliers at interface", "Interface residues with wwPDB validation outliers", "", "UniProt"),
+    ("Interfaces|CrystalContacts", r"Glycans near interface", "Glycan residues within the neighbourhood distance of interface atoms", "", "author"),
+    ("Interfaces|CrystalContacts", r"Ligands/ions near interface", "Other het groups within the neighbourhood distance of interface atoms", "", "author"),
+    ("Interfaces|CrystalContacts", r"Interface conservation", "Variant / conservation mapping (Milestone 3)", "", ""),
+    ("Interfaces|CrystalContacts|Summary", r"Canonical interface similarity", "Jaccard similarity of the interface residue set to the canonical interface", "0–1", "UniProt"),
+    ("Interfaces", r"Contact-pair similarity", "Jaccard similarity of unordered UniProt contact pairs to the canonical pairs", "0–1", "UniProt"),
+    ("Interfaces", r"Fraction of canonical interface recovered", "|interface ∩ canonical| / |canonical|", "fraction", ""),
+    ("Interfaces|Summary", r"Noncanonical interface flag", "Interface differs from the canonical dimer (low Jaccard or small BSA)", "", ""),
+    ("Interfaces", r"Noncanonical reason", "Which noncanonical criterion triggered", "", ""),
+    ("Interfaces", r"Interface RMSD \(Å\)", "CA RMSD of canonical interface residues after superposing protomer 1 on the reference", "Å", ""),
+    ("Interfaces", r"Protomer-2 rotation \(°\)", "Rotation needed to re-fit protomer 2 after the protomer-1 superposition", "degrees", ""),
+    ("Interfaces", r"Protomer-2 translation \(Å\)", "Translation needed to re-fit protomer 2", "Å", ""),
+    ("Interfaces", r"Protomer assignment", "Which protomer was matched to the reference protomer 1", "", ""),
+    ("Interfaces", r"Interface residues compared", "CA atoms used for the interface RMSD", "count", ""),
+    ("Interfaces|Summary", r"Interface cluster", "Hierarchical cluster of interface residue sets (1 − Jaccard, distance threshold)", "", ""),
+    ("Interfaces", r"In main cluster", "Interface belongs to the largest cluster", "", ""),
+    ("Interfaces", r"Main interface", "Largest-BSA target interface of the entry (used in Summary and comparison)", "", ""),
+    ("Interfaces", r"Missing canonical interface residues [12]", "Canonical interface residues without coordinates in this protomer", "", "UniProt"),
+    ("Interfaces|Summary", r"Interface complete", "All canonical interface residues are modelled in both protomers", "", ""),
+    ("CrystalContacts", r"Lattice operator", "Space-group operation and lattice shift (e.g. 2_565)", "", ""),
+    ("CrystalContacts", r"Matches canonical dimer", "Lattice interface reproduces the canonical dimer (Jaccard ≥ threshold)", "", ""),
+    ("InterfaceContacts", r"res_[ab]", "Residue label (aa + UniProt number, or resname + author number '(auth)')", "", "UniProt / author"),
+    ("InterfaceContacts", r"unp_[ab]", "UniProt number", "", "UniProt"),
+    ("InterfaceContacts", r"resname_[ab]", "Residue name", "", ""),
+    ("InterfaceContacts", r"auth_[ab]", "Author residue number + insertion code", "", "author"),
+    ("InterfaceContacts", r"min_dist", "Minimum heavy-atom distance", "Å", ""),
+    ("InterfaceContacts", r"atom_contacts", "Atom pairs within the contact cut-off", "count", ""),
+    ("InterfaceContacts", r"hbonds|salt_bridges|hydrophobic|aromatic", "Typed interactions of this residue pair", "count", ""),
+    ("InterfaceContacts", r"closest_atoms", "Atom names of the closest pair", "", ""),
+    ("InterfaceComparison", r"Interface [AB]", "Interface IDs compared", "", ""),
+    ("InterfaceComparison", r"Residue Jaccard|Contact-pair Jaccard", "Jaccard similarity", "0–1", "UniProt"),
+    ("InterfaceComparison", r"Fraction of A recovered in B", "|A ∩ B| / |A| (residue sets)", "fraction", ""),
+    ("CanonicalInterface", r"Item|Value", "Canonical interface definition and reference", "", "UniProt"),
+    # ---- Milestone 2: local model fit ----------------------------------------------------------------
+    ("LocalModelFit", r"Group", "Residue group (active site, lid, interface, ligands, ions, …)", "", ""),
+    ("LocalModelFit", r"Method kind", "xray / em / other (selects the metric and rule)", "", ""),
+    ("LocalModelFit", r"Residues in group", "Residues in the group for this entry", "count", ""),
+    ("LocalModelFit", r"Residues with metric", "Residues with RSCC (X-ray) or Q-score (EM) in the report", "count", ""),
+    ("LocalModelFit", r"Metric", "RSCC (X-ray) or Q-score (EM): never compared with each other", "", ""),
+    ("LocalModelFit", r"(Median|Min) RSCC", "Real-space correlation coefficient", "0–1", ""),
+    ("LocalModelFit", r"(Median|Min) Q-score", "Q-score (map–model resolvability)", "−1–1", ""),
+    ("LocalModelFit", r"Median RSRZ", "Real-space R Z-score (X-ray)", "z", ""),
+    ("LocalModelFit", r"Lowest-supported residue", "Residue with the lowest metric", "", "author"),
+    ("LocalModelFit", r"Residues (strong|acceptable|weak)", "Residues per support category", "count", ""),
+    ("LocalModelFit", r"Group support", "Category from the group statistic with the method-specific rule", "", ""),
+    ("LocalModelFit|LigandModelFit", r"(Group|Local) support score", "Category as number (3 strong … 0 unavailable)", "0–3", ""),
+    ("LigandModelFit", r"Component", "PDB chemical component ID", "", ""),
+    ("LigandModelFit", r"Residue no\. \(author\)", "Author residue number of the ligand/ion", "", "author"),
+    ("LigandModelFit", r"Alt\. conformation", "Alternate location code", "", ""),
+    ("LigandModelFit", r"RSCC|RSRZ|Q-score", "Validation-report fit metric of the ligand/ion", "", ""),
+    ("LigandModelFit", r"Occupancy \(avg\)", "Average occupancy", "fraction", ""),
+    ("LigandModelFit", r"Clashes|Geometry outliers|Chirality outliers", "Counts from the validation report", "count", ""),
+    ("LigandModelFit", r"B ratio ligand/environment \(indirect\)", "Indirect indicator only (not map fit)", "ratio", ""),
+    ("LigandModelFit", r"Local support", "Method-specific support category", "", ""),
+    ("EMMapFit", r"Schema", "wwPDB validation XML schema file", "", ""),
+    ("EMMapFit", r"emdb_id|EMDB-resolution|Q_score|atom_inclusion_.*|contour_level_primary_map|.*fsc_resolution.*|.*percentile-qrelative",
+     "EM map / model metric copied from the validation report (Entry attribute of the same name)", "as reported", ""),
+    ("EMMapFit", r"Per-chain mean Q-score", "Mean residue Q-score per author chain", "", "author"),
+    ("EMMapFit", r"Primary map|Half maps", "Availability according to the EMDB API ('unknown' if not reported)", "", ""),
+    # ---- Milestone 2: summary helpers and rankings --------------------------------------------------
+    ("Summary", r"Canonical dimer in crystal lattice", "Lattice operators reproducing the canonical dimer (for entries whose assembly lacks it)", "", ""),
+    ("Summary", r"(Active-site|Ligand|Interface|Entrance-lid) local support", "Group support category (LocalModelFit)", "", ""),
+    ("Summary", r"(Active-site|Ligand|Interface|Entrance-lid) local support score", "Group support as number for ranking (3 … 0)", "0–3", ""),
+    ("Summary", r"Ligand local support \(worst ligand\)", "Lowest category among ligands of interest (LigandModelFit)", "", ""),
+    ("Summary", r"Lowest-supported important residue", "Lowest-metric residue over all analysed groups", "", "author"),
+    ("Summary", r"Local-fit availability", "Validation-report residues available", "", ""),
+    ("Summary", r"Local-fit warning", "Groups with weak support", "", ""),
+    ("Summary", r"Interface validation warning", "Validation outliers at the main interface", "", ""),
+    ("Summary", r"Substitutions vs UniProt \(all chains\)", "All point differences from UniProt (engineered or natural)", "", "UniProt"),
+    ("Summary", r"N substitutions vs UniProt", "Number of distinct substitutions", "count", ""),
+    ("Summary", r"Has other polymer chains", "Non-target polymer entities present (e.g. antibodies)", "", ""),
+    ("Summary", r"Glycosylated Asn count", "Distinct observed N-glycosylation sites", "count", ""),
+    ("Summary", r"Zn site complete", "Zn in assembly = expected per protomer × protomers", "", ""),
+    ("Summary", r"Validation XML schema", "wwPDB validation XML schema used (or 'unavailable')", "", ""),
+    ("Summary", r"EM Q-score", "Entry-level Q-score (cryo-EM)", "−1–1", ""),
+    ("TemplateRanking", r"RankingMode|Mode description", "Ranking mode and its purpose (config ranking.modes)", "", ""),
+    ("TemplateRanking", r"Entries eligible", "Entries passing the mode's filters", "count", ""),
     # ---- run-level sheets ------------------------------------------------------------------------
     ("RunIssues", r"Stage", "Pipeline stage that recorded the issue", "", ""),
     ("RunIssues", r"Message", "Issue description", "", ""),
@@ -236,14 +339,22 @@ _DICT: list[tuple[str, str, str, str, str]] = [
 _COMPILED = [(re.compile(f"^(?:{s})$"), re.compile(f"^(?:{c})$"), d, u, n) for s, c, d, u, n in _DICT]
 
 
+SHEET_ALIASES = {"AssessmentSummary": ["Summary"], "TemplateRankings": ["TemplateRanking", "Summary"],
+                 "RankingTop": ["TemplateRanking"], "AssessmentIssues": ["RunIssues"]}
+
+
 def describe_column(sheet: str, column: str) -> dict[str, str]:
-    """Data-dictionary entry for a column (sheet-specific entries win over generic ones)."""
+    """Data-dictionary entry for a column (sheet-specific entries win over generic ones;
+    derived sheets such as AssessmentSummary fall back to their parent sheet)."""
     best = None
-    for s, c, d, u, n in _COMPILED:
-        if c.match(str(column)) and s.match(sheet):
-            specific = s.pattern != "^(?:.*)$"
-            if best is None or (specific and not best[0]):
-                best = (specific, d, u, n)
+    for name in [sheet] + SHEET_ALIASES.get(sheet, []):
+        for s, c, d, u, n in _COMPILED:
+            if c.match(str(column)) and s.match(name):
+                specific = s.pattern != "^(?:.*)$"
+                if best is None or (specific and not best[0]):
+                    best = (specific, d, u, n)
+        if best and best[0]:
+            break
     if best is None:
         return {"Description": "UNDOCUMENTED", "Units": "", "Numbering": ""}
     return {"Description": best[1], "Units": best[2], "Numbering": best[3]}

@@ -101,3 +101,27 @@ All differences were traced to these causes:
 ### Added files
 - `<ACC>_manifest.json`: the reproducibility manifest.
 - `survey_tables/*.csv` and `*.parquet`: every sheet as a machine-readable table.
+
+## Milestone 2 — interfaces, local model fit, ranking modes (v0.2.0)
+
+**New output:** `outputs/<ACC>_modelling_assessment.xlsx`, written by notebook 02 or `scripts/run_assessment.py`. Its sheets are:
+- AssessmentSummary
+- Interfaces, CrystalContacts, InterfaceContacts, InterfaceComparison, CanonicalInterface
+- LocalModelFit, LigandModelFit, EMMapFit
+- TemplateRankings, RankingTop
+- AssessmentIssues, Software, Reproducibility, DataDictionary
+
+The CSV/Parquet tables and the interface Jaccard matrix are also written. The survey workbook from notebook 01 is unchanged.
+
+**Design decisions:**
+- **Assemblies are built from gemmi's assembly operators applied to an atom table,** not with `gemmi.make_assembly`. Author chain, label_asym and UniProt numbering therefore survive every copy, and the geometry is testable without gemmi.
+- **SASA:** FreeSASA when installed, otherwise a numpy Shrake–Rupley implementation. The method used is recorded on every interface row. Tested against the analytic two-sphere complex (within 1%).
+- **The canonical interface is a consensus:** residues present in ≥ 50% of author-defined dimer interfaces. Noncanonical means a Jaccard below 0.3, or a BSA below half the canonical median.
+- **Crystal-lattice search:** every space-group operation × lattice shift of each target chain. This finds the canonical dimer in entries whose assembly is annotated as a monomer.
+- **Local fit uses method-specific rules:**
+  - X-ray: RSCC/RSRZ.
+  - Cryo-EM: Q-score relative to the resolution-expected value (Pintilie et al. 2020).
+  - Categories are combined only after these rules. A ligand without a metric is always "unsupported or unavailable".
+- **Ranking modes:** global (unchanged), active_site, ligand_bound, apo, open_lid, closed_lid, dimer_interface, md_start, glycosylated, cryoem_reference.
+
+**Bug fixed during development:** in a ranking mode, exclusion rules with several conditions removed only rows matching *all* of them. They now remove rows matching *any* (regression test added).
