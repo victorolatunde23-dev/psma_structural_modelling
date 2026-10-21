@@ -1,0 +1,34 @@
+# Structural regions of UniProt Q04609 (PSMA / GCPII), UniProt numbering.
+# Residue codes such as W541 are validated against the canonical sequence.
+
+accession: Q04609
+
+# Regions known to change conformation between structures (used by the
+# structural-variability analysis). Inclusive UniProt ranges.
+flexible_regions:
+  "entrance lid 541-548": [541, 548]
+  "glutarate sensor 692-704": [692, 704]
+
+entrance_lid:
+  # Literature: the lid (Trp541-Gly548) forms a single alpha-helix when CLOSED
+  # (small ligands) and has no regular secondary structure when OPEN (bulky
+  # ligands), exposing the arene-binding site (Trp541, Arg463, Arg511).
+  range: [541, 548]
+  arene_site: [W541, R463, R511]
+  # Calibration structures: a structured lid (3BHX) and an unstructured lid
+  # (2OOT), taken from structural-review figures. Verify against the papers
+  # you cite and extend as needed.
+  known_states:
+    3BHX: closed
+    2OOT: open
+  classifier:
+    helix_ca_i3_max: 6.0             # Å; CA(i)-CA(i+3) ~5.0-5.5 Å in a helix, > 8 Å extended
+    helix_fraction_min: 0.6          # fraction of i,i+3 pairs that must look helical
+    min_lid_modelled: 6              # of 8 lid residues; fewer = "disordered (not modelled)"
+    ashman_d_min: 2.0                # bimodality needed for the clustering vote
+    min_complete_lids_for_clustering: 4
+    cluster_helicity_gap: 0.2        # helicity difference needed to name clusters
+    superposition_exclusion_margin: 2   # residues either side of the lid excluded from the fit
+    low_confidence_resolution: 3.5   # Å; calls from worse structures are downgraded
+    ligand_size_bins: [-1, 0, 20, 35, 1000000000]
+    ligand_size_labels: ["none", "small (≤20)", "medium (21-35)", "large (>35)"]

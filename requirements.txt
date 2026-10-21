@@ -1,0 +1,14 @@
+# Core dependencies (Milestone 1). Optional extras are listed in pyproject.toml.
+numpy>=1.24
+pandas>=2.2
+scipy>=1.10
+requests>=2.28
+openpyxl>=3.1
+pyyaml>=6.0
+gemmi>=0.6.4
+matplotlib>=3.7
+seaborn>=0.12
+scikit-learn>=1.3
+networkx>=3.0
+pytest>=7.0
+pyarrow>=12          # Parquet output (skipped with a warning if missing)

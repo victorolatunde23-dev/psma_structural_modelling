@@ -1,0 +1,38 @@
+# Active-site definition for UniProt Q04609 (PSMA / GCPII).
+#
+# Residues use UniProt canonical numbering. Each entry is validated against
+# the canonical sequence at run time; any residue whose amino acid does not
+# match is DROPPED and reported in the ActiveSiteDefinition table (never
+# silently ignored).
+#
+# The final active-site set is the union of:
+#   * UniProt features of the types listed in uniprot_feature_types
+#     (only features spanning <= max_feature_span residues), and
+#   * the literature residues below.
+
+accession: Q04609
+
+uniprot_feature_types: [Active site, Binding site, Site, Metal binding]
+max_feature_span: 4          # features covering more residues are treated as regions, not sites
+
+literature_sites:
+  R210: "S1' pocket (glutamate alpha-carboxylate)"
+  N257: "S1' pocket"
+  H377: "Zn1 ligand"
+  D387: "bridging Zn1/Zn2 ligand"
+  E424: "catalytic acid/base"
+  E425: "Zn2 ligand"
+  D453: "Zn1 ligand"
+  R463: "S1 arginine patch"
+  R534: "S1 arginine patch"
+  R536: "S1 arginine patch"
+  Y552: "S1' pocket / transition-state stabilisation"
+  H553: "Zn2 ligand"
+  K699: "S1' pocket"
+  Y700: "S1' pocket"
+
+metal_site:
+  expected_zn_per_protomer: 2
+  zn_ligands:                 # used by sanity checks now and by metal_sites.py in Milestone 5
+    Zn1: [H377, D387, D453]
+    Zn2: [D387, E425, H553]

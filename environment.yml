@@ -1,0 +1,40 @@
+# Full conda environment, including tools needed in later milestones.
+# Core-only users can instead run:  pip install -e .
+name: psma-modelling
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas>=2.2
+  - scipy
+  - requests
+  - openpyxl
+  - pyyaml
+  - gemmi
+  - matplotlib
+  - seaborn
+  - scikit-learn
+  - networkx
+  - pytest
+  - pyarrow
+  # Milestone 2-3 (interfaces, SASA, ligand chemistry)
+  - biopython
+  - freesasa
+  - rdkit
+  # Milestone 4 (AlphaFold comparison)
+  - tmtools
+  # Milestone 5-6 (preparation, MD setup) - optional
+  - openmm
+  - pdbfixer
+  - propka
+  - pdb2pqr
+  - ambertools
+  - openbabel
+  - fpocket
+  - dssp
+  # Milestone 7 (trajectory analysis)
+  - mdanalysis
+  - pip
+  - pip:
+      - -e .

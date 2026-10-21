@@ -1,0 +1,98 @@
+# Default configuration for the PSMA structural-modelling pipeline.
+#
+# Every value here is recorded in the reproducibility manifest of each run.
+# Override any key by passing a second YAML file or a dict to
+# psma_pipeline.config.load_config(overrides=...).
+
+target:
+  accession: Q04609                 # UniProt accession of the target
+  name: PSMA / GCPII / FOLH1
+  # Target-specific definition files (paths relative to this config folder).
+  # For another protein, copy and edit these files and point to them here.
+  active_site_file: psma_active_site.yaml
+  regions_file: psma_regions.yaml
+  ligand_classes_file: ligand_classes.yaml
+
+run:
+  limit: null                       # process only the first N entries (null = all)
+  use_coordinates: true             # download mmCIF and analyse with gemmi
+  random_seed: 20261021             # used by every stochastic step
+  ids: null                         # explicit list of PDB IDs (overrides search)
+
+paths:                              # relative to the project root unless absolute
+  cache: cache
+  outputs: outputs
+  data: data
+
+outputs:
+  survey_workbook: "{accession}_structures.xlsx"
+  write_csv: true
+  write_parquet: true               # skipped with a warning if pyarrow is missing
+  manifest: "{accession}_manifest.json"
+
+http:
+  retries: 5
+  backoff_factor: 1.0
+  timeout_s: 120
+  polite_delay_s: 0.15              # pause after each uncached request
+  user_agent: psma-structural-modelling/0.1 (python-requests)
+  refresh_404_after_days: 30        # re-fetch cached "not found" responses after this
+
+endpoints:
+  rcsb_search: https://search.rcsb.org/rcsbsearch/v2/query
+  rcsb_graphql: https://data.rcsb.org/graphql
+  rcsb_cif: https://files.rcsb.org/download/{pdb}.cif.gz
+  pdbe_sifts: https://www.ebi.ac.uk/pdbe/api/mappings/uniprot/{pdb}
+  pdbe_best: https://www.ebi.ac.uk/pdbe/api/mappings/best_structures/{acc}
+  pdbe_val_percentiles: https://www.ebi.ac.uk/pdbe/api/validation/global-percentiles/entry/{pdb}
+  pdbe_val_outliers: https://www.ebi.ac.uk/pdbe/api/validation/residuewise_outlier_summary/entry/{pdb}
+  uniprot_json: https://rest.uniprot.org/uniprotkb/{acc}?format=json
+
+structure:
+  # first = model 1 only (default). all = every model of NMR ensembles
+  # (accepted, but until Milestone 2 it falls back to model 1 with a warning).
+  model_policy: first
+  # Order in which assemblies are preferred; the first match wins.
+  assembly_preference: [author, software, first]
+
+contacts:                           # Å
+  metal: 2.8                        # first coordination shell
+  anion: 3.6                        # chloride
+  ligand: 4.0                       # organic ligand – protein contacts
+  glycan_link: 2.0                  # sugar C1 – Asn ND2 covalent link
+  neighbour_search_radius: 6.0
+  backbone_atoms: [N, CA, C, O, OXT]
+
+variability:
+  min_common_ca: 50                 # minimum common CA atoms to superpose two chains
+
+ranking:
+  # Each mode: criteria with direction (lower/higher = better), weight and
+  # missing-value policy. Milestone 1 implements the "global" mode, which
+  # reproduces the original equal-weight ranking exactly.
+  modes:
+    global:
+      description: Global homology-modelling template (original ranking)
+      include: {}
+      exclude: {}
+      criteria:
+        - {column: "Resolution (Å)",            direction: lower,  weight: 1}
+        - {column: "Clashscore",                direction: lower,  weight: 1}
+        - {column: "Ramachandran outliers (%)", direction: lower,  weight: 1}
+        - {column: "Fewest internal missing",   direction: lower,  weight: 1}
+        - {column: "Best UniProt coverage",     direction: higher, weight: 1}
+        - {column: "Active-site completeness",  direction: higher, weight: 1}
+      missing: ignore               # ignore = average over available criteria
+
+sanity:
+  zn_ligand_distance_range: [1.8, 2.6]   # Å; Zn–N/O/S first-shell distances
+  critical_checks:                       # a FAIL in any of these stops the full run
+    - assembly_copies_vs_rcsb
+    - sifts_segment_integrity
+    - active_site_sequence_match
+    - lid_calibration
+
+validation_set:
+  fixed_ids: [3BHX, 2OOT, 9S7U]      # calibration structures + previous top template
+  extra_ids: []                      # e.g. an entry with a disordered lid
+  previous_workbook: null            # path to an earlier workbook (used to pick a disordered-lid entry)
