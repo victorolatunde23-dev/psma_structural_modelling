@@ -22,7 +22,7 @@ Status key:
 | 20 | Tests: assembly expansion, symmetry dimer counting, contacts, Zn distances, glycosylation, cell-edge contacts | `tests/test_assemblies.py`, `tests/test_pockets.py` | ✅ passed in Colab (gemmi 0.7.5) |
 | 20 | Validation-set selection and sanity checks | `sanity.py` | ✅ validation set and full run (90 entries) in Colab; no critical FAIL |
 | 21 | Milestone regression: compare workbooks | `excel_output.compare_workbooks` | ✅ M1 vs original: all differences explained (docs/CHANGES.md) |
-| 3 | Dimer-interface analysis: assembly from gemmi operators, contacts, typed interactions, BSA, composition, B-factors, outliers, nearby glycans/ligands | `structure_atoms.py`, `sasa.py`, `interfaces.py` | ✅ offline tests; ✅ real-data validation set in Colab (all checks PASS); full-run counts not yet reported back |
+| 3 | Dimer-interface analysis: assembly from gemmi operators, contacts, typed interactions, BSA, composition, B-factors, outliers, nearby glycans/ligands | `structure_atoms.py`, `sasa.py`, `interfaces.py` | ✅ offline tests; ✅ Colab: validation set and full run (90 entries, 93/93 checks PASS, no issues recorded) |
 | 3 | Interface comparison: Jaccard, contact pairs, recovery, interface RMSD, orientation, clustering, noncanonical flag; crystal-lattice contacts | `interfaces.py`, `assessment.py` | ✅ offline; 🟡 real data |
 | 3 | Interface conservation | `variants.py` | ✅ variants categorised "dimer interface" in VariantStructureMapping; 🟡 real data |
 | 5 | wwPDB validation XML (schema recorded), LocalModelFit, LigandModelFit, EMMapFit, method-specific categories | `validation.py`, `local_fit.py` | ✅ offline (synthetic X-ray and EM XML); 🟡 real reports in Colab |
