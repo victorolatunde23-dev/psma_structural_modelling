@@ -10,7 +10,7 @@ so the core workflow can be reused for another UniProt accession.
 
 ## Status
 
-**Milestones 1–2 of 7 are complete.** Milestone 1: the original survey notebook has been
+**Milestones 1–3 of 7 are complete.** Milestone 1: the original survey notebook has been
 refactored into an importable package, with configuration, tests, sanity
 checks and a reproducibility manifest. See [`docs/CHECKLIST.md`](docs/CHECKLIST.md)
 for every component and [`docs/PLAN.md`](docs/PLAN.md) for the full plan.
@@ -18,7 +18,7 @@ for every component and [`docs/PLAN.md`](docs/PLAN.md) for the full plan.
 | Notebook | Purpose | Milestone |
 |---|---|---|
 | `01_structure_survey.ipynb` | PDB survey, cross-check, assemblies, ligands, validation, lid states, template ranking | **M1 ✔** |
-| `02_interface_pocket_validation.ipynb` | dimer interfaces, crystal contacts, local map-model fit, ranking modes (**M2 ✔**); pocket fingerprints, conserved waters, variants (M3) | M2–M3 |
+| `02_interface_pocket_validation.ipynb` | part 1: dimer interfaces, crystal contacts, local map-model fit, ranking modes (**M2 ✔**); part 2: pocket fingerprints, ligand clustering, ligand-conditioned ranking, conserved waters, variants (**M3 ✔**) | M2–M3 |
 | `03_alphafold_comparison.ipynb` | AlphaFold / ColabFold monomer and multimer assessment | M4 |
 | `04_model_preparation.ipynb` | repairs, protonation, Zn site, ligands, glycans, construct context | M5 |
 | `05_md_system_setup.ipynb` | force fields, parameter provenance, solvation, MD readiness | M6 |
@@ -58,8 +58,9 @@ src/psma_pipeline/
   assemblies.py   ligands.py   pockets.py   glycans.py   active_site.py   conformations.py
   validation.py   ranking.py   survey.py   sanity.py   manifest.py   excel_output.py
   structure_atoms.py   sasa.py   interfaces.py   local_fit.py   assessment.py   (M2)
+  fingerprints.py   ligand_chem.py   waters.py   variants.py   pocket_analysis.py   (M3)
 notebooks/    one notebook per stage (explanation + plots; no calculations)
-scripts/      run_survey.py, run_assessment.py (command-line equivalents of notebooks 01 and 02)
+scripts/      run_survey.py, run_assessment.py, run_pockets.py (command-line equivalents of notebooks 01 and 02)
 tests/        pytest suite (offline; gemmi tests skip without gemmi; network tests opt-in)
 docs/         PLAN.md, CHECKLIST.md, CHANGES.md
 data/ cache/ outputs/   (contents not tracked)
@@ -74,6 +75,7 @@ data/ cache/ outputs/   (contents not tracked)
 - **The B-factor ratio is an indirect indicator.** It is not used as a measure of map-model fit.
 - **Failures are recorded.** Every failure goes into a `Calculation status` / `Warning` column and the `RunIssues` sheet; none are silent.
 - **Originals are never overwritten.** Downloaded files are immutable.
+- **Variants are hypotheses.** Variant tables describe where a substitution sits; they never predict its effect.
 
 ## Data sources
 

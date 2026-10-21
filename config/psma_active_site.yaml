@@ -36,3 +36,19 @@ metal_site:
   zn_ligands:                 # used by sanity checks now and by metal_sites.py in Milestone 5
     Zn1: [H377, D387, D453]
     Zn2: [D387, E425, H553]
+
+# Sub-pockets of the GCPII/PSMA substrate-binding cavity (UniProt numbering).
+# Every residue is validated against the canonical sequence at run time
+# (mismatches are dropped and reported). A residue may belong to several
+# sub-pockets; ligand contacts outside all of them are "accessory / undefined".
+# Basis: GCPII structural literature (glutamate-recognising S1' pocket, S1
+# pocket with the arginine patch, binuclear zinc site, arene-binding site
+# exposed by the open entrance lid). The entrance funnel is an approximation
+# (lid 539-549); refine it if you use a more detailed definition.
+subpockets:
+  binuclear zinc region: [H377, D387, E424, E425, D453, H553, Y552]
+  S1 pocket: [R463, R534, R536, N519, G518, Y549, S454]
+  S1' glutamate pocket: [F209, R210, N257, L428, G518, Y552, K699, Y700]
+  arginine patch: [R463, R534, R536]
+  arene-binding site: [W541, R463, R511]
+  entrance funnel: [K539, N540, W541, E542, T543, N544, K545, F546, S547, G548, Y549]

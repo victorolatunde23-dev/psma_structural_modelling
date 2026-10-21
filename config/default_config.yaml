@@ -27,6 +27,7 @@ paths:                              # relative to the project root unless absolu
 outputs:
   survey_workbook: "{accession}_structures.xlsx"
   assessment_workbook: "{accession}_modelling_assessment.xlsx"
+  pocket_workbook: "{accession}_pockets_waters_variants.xlsx"
   write_csv: true
   write_parquet: true               # skipped with a warning if pyarrow is missing
   manifest: "{accession}_manifest.json"
@@ -51,6 +52,8 @@ endpoints:
   validation_xml: https://files.rcsb.org/pub/pdb/validation_reports/{mid}/{pdb}/{pdb}_validation.xml.gz
   validation_xml_fallback: https://www.ebi.ac.uk/pdbe/entry-files/download/{pdb}_validation.xml
   emdb_entry: https://www.ebi.ac.uk/emdb/api/entry/{emdb}
+  rcsb_chem_comp: https://data.rcsb.org/graphql
+  ebi_variation: https://www.ebi.ac.uk/proteins/api/variation/{acc}
 
 structure:
   # first = model 1 only (default). all = every model of NMR ensembles
@@ -241,3 +244,57 @@ validation_set:
   fixed_ids: [3BHX, 2XEG, 2OOT, 9S7U]   # lid calibration (closed, open), disordered-lid example, previous top template
   extra_ids: []                      # e.g. an entry with a disordered lid
   previous_workbook: null            # path to an earlier workbook (used to pick a disordered-lid entry)
+
+pockets:                        # Milestone 3: ligand interaction fingerprints
+  contact_max: 4.5              # Å, ligand–protein heavy-atom contact
+  hbond_max: 3.5                # Å, ligand N/O – protein donor/acceptor (distance-only)
+  ionic_max: 4.0                # Å, ligand O/N – basic/acidic protein atoms ("possible salt bridge")
+  hydrophobic_max: 4.5          # Å, ligand C – hydrophobic side-chain C
+  aromatic_centroid_max: 6.0    # Å, ring-centroid distance (π-stacking, possible)
+  cation_pi_max: 6.0            # Å, cation (Lys NZ / Arg CZ / ligand N) – ring centroid
+  metal_max: 2.8                # Å, ligand N/O/S – metal
+  water_bridge_max: 3.5         # Å, water O to both a ligand and a protein polar atom
+  weight_floor: 2.5             # Å, distance weight = 1 at or below this distance, 0 at contact_max
+  clustering:
+    hierarchical_method: average
+    distance_thresholds: [0.3, 0.4, 0.5, 0.6, 0.7]   # 1 − Tanimoto; diagnostics reported for each
+    chosen_threshold: 0.5
+    dbscan_eps: 0.4
+    dbscan_min_samples: 3
+  # Ligand-conditioned ranking (LigandConditionedRanking sheet). Leave null to skip
+  # in the full run; the notebook can call rank_for_ligand() for any ligand afterwards.
+  reference_ligand: null        # PDB component ID present in the analysed structures
+  reference_smiles: null        # SMILES of a ligand not in the PDB (overrides the CCD SMILES)
+  required_subpockets: []       # e.g. ["S1' glutamate pocket", "binuclear zinc region"]
+  desired_lid_state: null       # open | closed | null
+  ligand_conditioned:           # ligand-specific template ranking (weights; missing = worst)
+    criteria:
+      - {column: "Pocket-contact similarity",      direction: higher, weight: 3}
+      - {column: "Ligand chemical similarity",     direction: higher, weight: 2}
+      - {column: "Zinc-coordination similarity",   direction: higher, weight: 1}
+      - {column: "Entrance-lid state match",       direction: higher, weight: 1}
+      - {column: "Ligand local support score",     direction: higher, weight: 1}
+      - {column: "Active-site completeness",       direction: higher, weight: 1}
+      - {column: "Missing residues near pocket",   direction: lower,  weight: 1}
+      - {column: "Conserved waters present",       direction: higher, weight: 0.5}
+      - {column: "Resolution (Å)",                 direction: lower,  weight: 1}
+      - {column: "Clashscore",                     direction: lower,  weight: 0.5}
+    missing: worst
+
+waters:                         # Milestone 3: conserved structural waters
+  max_resolution: 2.2           # Å, eligible X-ray structures only
+  max_clashscore: 10
+  superpose_on: active_site     # active_site | core (all common CA)
+  region_radius: 8.0            # Å, waters kept within this distance of Zn / active-site / ligand atoms
+  cluster_distance: 1.2         # Å, complete-linkage clustering of water oxygens (reference frame)
+  hbond_max: 3.5                # Å, water – protein N/O partners
+  zn_bridge_max: 2.5            # Å, water within this distance of both Zn = bridging water/hydroxide
+  retain_min_fraction: 0.7      # retain if present in >= this fraction of eligible sites ...
+  retain_min_partners: 2        # ... and H-bonded to >= this many protein atoms (or bound to Zn)
+
+variants:                       # Milestone 3: sequence-variant mapping
+  sources: [uniprot]            # add ebi_proteins to include gnomAD / ClinVar / COSMIC via the EBI Proteins API
+  buried_rsa_max: 0.20          # relative SASA below this = buried
+  exposed_rsa_min: 0.40
+  high_variability_rmsf: 1.0    # Å, per-residue CA RMSF above this = high structural variability
+  near_distance: 6.0            # Å, "near" active site / ligand / metal / interface

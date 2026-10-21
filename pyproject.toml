@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "psma-pipeline"
-version = "0.2.0"
+version = "0.3.0"
 description = "Structural-bioinformatics pipeline for PSMA / GCPII (UniProt Q04609): PDB survey, modelling assessment, MD preparation and analysis"
 readme = "README.md"
 requires-python = ">=3.10"

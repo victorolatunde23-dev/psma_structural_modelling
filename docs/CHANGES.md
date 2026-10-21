@@ -125,3 +125,25 @@ The CSV/Parquet tables and the interface Jaccard matrix are also written. The su
 - **Ranking modes:** global (unchanged), active_site, ligand_bound, apo, open_lid, closed_lid, dimer_interface, md_start, glycosylated, cryoem_reference.
 
 **Bug fixed during development:** in a ranking mode, exclusion rules with several conditions removed only rows matching *all* of them. They now remove rows matching *any* (regression test added).
+
+
+## Milestone 3 — pockets, conserved waters, variants (v0.3.0)
+
+**New output:** `outputs/<ACC>_pockets_waters_variants.xlsx`, written by notebook 02 part 2 or `scripts/run_pockets.py`. A separate workbook keeps part 1 and part 2 independently re-runnable. Its sheets are:
+- SubpocketDefinition, PocketFingerprints, LigandInteractions, SubpocketOccupancy
+- PocketSimilarity, LigandClusters, ClusterDiagnostics, LigandChemistry
+- ConservedWaters, WaterMembers, WaterSites
+- Variants, VariantStructureMapping, VariantSummary
+- LigandConditionedRanking (only when a reference ligand is given)
+- PocketChecks, PocketIssues, Software, Reproducibility, DataDictionary
+
+**Design decisions:**
+- **Interactions are typed by distance only** and labelled "possible" where geometry would be needed (H-bond, salt bridge, π-stacking, cation–π). Ligand rings are found from a distance-derived bond graph (planar 5/6-membered cycles).
+- **Sub-pockets** are defined in `config/psma_active_site.yaml` and validated against the canonical sequence, like every configured residue.
+- **One representative per (entry, ligand)** – the copy with most contacts – is used for similarity and clustering; every copy is kept in PocketFingerprints.
+- **Clustering** on 1 − interaction Tanimoto: hierarchical (average linkage) at several thresholds with silhouette diagnostics, plus DBSCAN. No fixed number of clusters.
+- **Ligand-conditioned ranking** (`rank_for_ligand`) reuses the stored fingerprints, so a new reference ligand costs seconds. Apo entries get missing similarity (= worst).
+- **Conserved waters:** X-ray ≤ 2.2 Å and clashscore ≤ 10 only; superposition on active-site CA; complete linkage at 1.2 Å; Zn-bridging waters are flagged for the Milestone 5 metal-model decision.
+- **Variants:** reference residue checked against the canonical sequence (mismatches are FAIL and not mapped); structural context from the top `md_start` template's assembly; text is always a hypothesis, never a prediction.
+
+**Changed in part 1:** the LocalModelFit "conserved waters" row is now NOT APPLICABLE with a pointer to the new workbook (was NOT RUN, "Milestone 3").

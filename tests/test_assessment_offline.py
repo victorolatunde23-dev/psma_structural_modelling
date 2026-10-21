@@ -130,7 +130,7 @@ def test_local_fit_tables(assessed):
     groups = set(lf[lf["PDB ID"] == "DIM1"]["Group"])
     assert {"active site", "metal-coordinating residues", "ligand-contact residues", "entrance lid 541-548",
             "dimer-interface residues", "glycosylation sites", "ligands", "conserved waters"} <= groups
-    assert lf[(lf["PDB ID"] == "DIM1") & (lf["Group"] == "conserved waters")]["Calculation status"].iloc[0] == "NOT RUN"
+    assert lf[(lf["PDB ID"] == "DIM1") & (lf["Group"] == "conserved waters")]["Calculation status"].iloc[0] == "NOT APPLICABLE"
     em = t["EMMapFit"]
     assert list(em["PDB ID"]) == ["EM1"] and em["Half maps"].iloc[0] == "2 available"
     lig = t["LigandModelFit"]

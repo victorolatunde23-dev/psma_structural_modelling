@@ -22,14 +22,14 @@ Status key:
 | 20 | Tests: assembly expansion, symmetry dimer counting, contacts, Zn distances, glycosylation, cell-edge contacts | `tests/test_assemblies.py`, `tests/test_pockets.py` | ✅ passed in Colab (gemmi 0.7.5) |
 | 20 | Validation-set selection and sanity checks | `sanity.py` | ✅ validation set and full run (90 entries) in Colab; no critical FAIL |
 | 21 | Milestone regression: compare workbooks | `excel_output.compare_workbooks` | ✅ M1 vs original: all differences explained (docs/CHANGES.md) |
-| 3 | Dimer-interface analysis: assembly from gemmi operators, contacts, typed interactions, BSA, composition, B-factors, outliers, nearby glycans/ligands | `structure_atoms.py`, `sasa.py`, `interfaces.py` | ✅ offline tests (analytic BSA, synthetic dimer); 🟡 gemmi extraction + real data in Colab |
+| 3 | Dimer-interface analysis: assembly from gemmi operators, contacts, typed interactions, BSA, composition, B-factors, outliers, nearby glycans/ligands | `structure_atoms.py`, `sasa.py`, `interfaces.py` | ✅ offline tests; ✅ real-data validation set in Colab (all checks PASS); full-run counts not yet reported back |
 | 3 | Interface comparison: Jaccard, contact pairs, recovery, interface RMSD, orientation, clustering, noncanonical flag; crystal-lattice contacts | `interfaces.py`, `assessment.py` | ✅ offline; 🟡 real data |
-| 3 | Interface conservation | `variants.py` | ⬜ M3 |
+| 3 | Interface conservation | `variants.py` | ✅ variants categorised "dimer interface" in VariantStructureMapping; 🟡 real data |
 | 5 | wwPDB validation XML (schema recorded), LocalModelFit, LigandModelFit, EMMapFit, method-specific categories | `validation.py`, `local_fit.py` | ✅ offline (synthetic X-ray and EM XML); 🟡 real reports in Colab |
-| 8 | Ten ranking modes with filters, weights, missing policy, explanations | `ranking.py`, `assessment.py`, config | ✅ (ligand-conditioned ranking: M3) |
-| 4 | Pocket fingerprints, sub-pockets, ligand clustering, ligand-conditioned ranking | `pockets.py` | ⬜ M3 |
-| 14 | Conserved waters | `waters.py` | ⬜ M3 |
-| 6 | Variant mapping | `variants.py` | ⬜ M3 |
+| 8 | Ten ranking modes with filters, weights, missing policy, explanations; ligand-conditioned ranking | `ranking.py`, `assessment.py`, `pocket_analysis.rank_for_ligand`, config | ✅ offline; 🟡 ligand-conditioned on real data |
+| 4 | Pocket fingerprints (binary, weighted, typed), sub-pocket occupancy, similarity, clustering with diagnostics, ligand chemistry | `fingerprints.py`, `ligand_chem.py`, `pocket_analysis.py` | ✅ offline (synthetic geometry, end-to-end with stubbed gemmi); 🟡 real data, RDKit in Colab |
+| 14 | Conserved waters (superposition, complete-linkage clustering, Zn bridging, retain/consider/remove) | `waters.py` | ✅ offline; 🟡 real data |
+| 6 | Variant mapping (UniProt, optional EBI Proteins API; reference check; RSA, distances, RMSF, sequons, disulfides; hypotheses only) | `variants.py` | ✅ offline; 🟡 real data; AlphaFold columns M4 |
 | 7 | AlphaFold / ColabFold import and comparison | `alphafold.py` | ⬜ M4 |
 | 9 | Structure-repair assessment and rebuilding | `model_preparation.py` | ⬜ M5 |
 | 10 | Protonation and H-bond network | `model_preparation.py` | ⬜ M5 |

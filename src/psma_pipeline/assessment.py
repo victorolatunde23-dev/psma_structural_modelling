@@ -267,7 +267,8 @@ def run_assessment(cfg: Config, tables: dict[str, pd.DataFrame], ids: list[str] 
         for gname, mem in groups.items():
             local_rows.append(group_fit(pdb, gname, mem, fit, kind, res_for_q, fcfg))
         local_rows.append({"PDB ID": pdb, "Group": "conserved waters", "Method kind": kind,
-                           "Calculation status": Status.NOT_RUN.value, "Warning": "conserved waters: Milestone 3"})
+                           "Calculation status": Status.NOT_APPLICABLE.value,
+                           "Warning": "see ConservedWaters in the pockets/waters/variants workbook (notebook 02 part 2)"})
         ligand_rows += ligand_fit_rows(pdb, fit, kind, res_for_q, fcfg, classify, tables.get("BindingSites"))
         if k % 10 == 0 or k == len(ids):
             log.info("assessment %d/%d", k, len(ids))

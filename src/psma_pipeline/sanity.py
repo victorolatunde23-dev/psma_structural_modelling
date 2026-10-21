@@ -470,3 +470,87 @@ def assessment_validation_ids(tables: dict[str, pd.DataFrame], cfg: Config, n_di
     if len(em):
         add(em["PDB ID"].iloc[0], "best-resolution cryo-EM entry")
     return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# Milestone 3: pockets, waters, variants
+# ---------------------------------------------------------------------------
+def pocket_validation_ids(tables: dict[str, pd.DataFrame], cfg: Config, n_waters: int = 4) -> pd.DataFrame:
+    """Assessment validation set plus the best high-resolution X-ray entries (so the
+    conserved-water clustering has enough sites to be meaningful)."""
+    sel = assessment_validation_ids(tables, cfg)
+    s = tables["Summary"]
+    wmax = float(cfg.get("waters.max_resolution", 2.2))
+    xr = s[s["Method"].astype(str).str.contains("X-RAY") & (pd.to_numeric(s["Resolution (Å)"], errors="coerce") <= wmax)]
+    extra = [p for p in xr.sort_values("Resolution (Å)")["PDB ID"] if p not in set(sel["PDB ID"])][:n_waters]
+    add = pd.DataFrame([{"PDB ID": p, "Reason": f"high-resolution X-ray (≤ {wmax} Å): conserved-water sites"} for p in extra])
+    return pd.concat([sel, add], ignore_index=True)
+
+
+def run_pocket_checks(tables: dict[str, pd.DataFrame], survey: dict[str, pd.DataFrame],
+                      ids: list[str] | None = None) -> pd.DataFrame:
+    """Sanity checks of notebook 02 part 2.
+
+    Critical: the ligand similarity matrix must be symmetric with unit
+    diagonal, and the variant reference check must not fail for most
+    variants (that indicates a numbering/isoform problem).
+    """
+    rows = []
+    critical = {"similarity_matrix_consistent", "variant_numbering"}
+    bs = survey.get("BindingSites", pd.DataFrame())
+    fp = tables.get("PocketFingerprints", pd.DataFrame())
+    if len(bs) and "Class" in bs:
+        holo = sorted(set(bs[bs["Class"] == "ligand of interest"]["PDB ID"]))
+        analysed = set(fp["PDB ID"]) if len(fp) else set()
+        ids_run = set(fp["PDB ID"]) | set(tables.get("WaterSites", pd.DataFrame()).get("PDB ID", pd.Series(dtype=str)))
+        ids_run |= set(ids or [])
+        target = [p for p in holo if not ids_run or p in ids_run]
+        missing = [p for p in target if p not in analysed]
+        rows.append(_row("ligand_entries_fingerprinted", Status.PASS if not missing else Status.WARNING,
+                         f"{len(target) - len(missing)}/{len(target)} ligand-bound entries have fingerprints"
+                         + (f"; missing: {', '.join(missing[:15])}" if missing else "")))
+    if len(fp):
+        empty = fp[fp["Residues contacted"] == 0]
+        rows.append(_row("fingerprints_non_empty", Status.PASS if empty.empty else Status.WARNING,
+                         f"{len(empty)} instances without protein contacts"))
+    sim = tables.get("PocketSimilarity", pd.DataFrame())
+    if len(sim):
+        bad = sim[(sim["Interaction Tanimoto"].fillna(0) < 0) | (sim["Interaction Tanimoto"].fillna(0) > 1)]
+        rows.append(_row("similarity_matrix_consistent", Status.PASS if bad.empty else Status.FAIL,
+                         f"{len(sim)} pairs, all similarities within 0–1" if bad.empty else f"{len(bad)} pairs outside 0–1"))
+    sp = tables.get("SubpocketDefinition", pd.DataFrame())
+    if len(sp):
+        drop = sp[sp["Status"] != Status.OK.value]
+        rows.append(_row("subpocket_residues_valid", Status.PASS if drop.empty else Status.WARNING,
+                         "all sub-pocket residues match the canonical sequence" if drop.empty
+                         else "dropped: " + ", ".join(drop["Residue"])))
+    ws = tables.get("WaterSites", pd.DataFrame())
+    cw = tables.get("ConservedWaters", pd.DataFrame())
+    n_sites = int((ws["Status"] == Status.OK.value).sum()) if len(ws) else 0
+    if n_sites >= 3:
+        zn = cw[(cw["Zn-bound fraction"] >= 0.5) & (cw["Conservation fraction"] >= 0.5)] if len(cw) else cw
+        rows.append(_row("catalytic_water_found", Status.PASS if len(zn) else Status.WARNING,
+                         f"{len(zn)} conserved Zn-bound water cluster(s) over {n_sites} sites"
+                         if len(zn) else f"no conserved Zn-bound water over {n_sites} sites (check Zn/superposition)"))
+        rmsd = pd.to_numeric(ws["Superposition RMSD (Å)"], errors="coerce")
+        hi = ws[rmsd > 1.0]
+        rows.append(_row("water_site_superposition", Status.PASS if hi.empty else Status.WARNING,
+                         f"max active-site CA RMSD {rmsd.max():.2f} Å" if hi.empty
+                         else "RMSD > 1 Å: " + ", ".join(hi["PDB ID"] + "/" + hi["Chain"])))
+    else:
+        rows.append(_row("catalytic_water_found", Status.NOT_APPLICABLE, f"only {n_sites} eligible water sites"))
+    var = tables.get("Variants", pd.DataFrame())
+    if len(var):
+        single = var[var["Status"].isin([Status.OK.value, Status.FAIL.value])]
+        nfail = int((single["Status"] == Status.FAIL.value).sum())
+        frac = nfail / len(single) if len(single) else 0
+        st = Status.PASS if nfail == 0 else (Status.FAIL if frac > 0.5 else Status.WARNING)
+        rows.append(_row("variant_numbering", st, f"{nfail}/{len(single)} substitutions fail the reference-residue check"))
+    mp = tables.get("VariantStructureMapping", pd.DataFrame())
+    if len(mp):
+        bad = mp[~mp["Hypothesis"].astype(str).str.startswith("Hypothesis")]
+        rows.append(_row("variant_text_is_hypothesis", Status.PASS if bad.empty else Status.FAIL,
+                         f"{len(mp)} mapped variants, all phrased as hypotheses"))
+    df = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["Check", "Status", "PDB ID", "Chain", "Detail"])
+    df.insert(1, "Critical", df["Check"].isin(critical))
+    return df

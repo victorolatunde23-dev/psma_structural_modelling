@@ -278,7 +278,7 @@ def analyse_interface(pdb: str, asm: pd.DataFrame, p1: str, p2: str, cfg: dict, 
         "Validation outliers at interface": "; ".join(out_hits),
         "Glycans near interface": ", ".join(glycans),
         "Ligands/ions near interface": ", ".join(others),
-        "Interface conservation": "NOT RUN (variant data: Milestone 3)",
+        "Interface conservation": "NOT RUN here: see VariantStructureMapping (category dimer interface)",
         "Calculation status": (Status.WARNING if warn else Status.OK).value,
         "Warning": "; ".join(warn),
     })
