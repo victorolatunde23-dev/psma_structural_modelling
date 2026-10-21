@@ -178,3 +178,12 @@ def test_assessment_sanity_checks(assessed):
     t["Interfaces"] = t["Interfaces"].assign(**{"Residue contacts": 0})
     bad = run_assessment_checks(t, _tables()["Summary"])
     assert (bad[bad["Check"] == "dimer_interface_present"]["Status"] == "FAIL").all()
+
+
+def test_assessment_validation_set_always_has_dimers(cfg):
+    from psma_pipeline.sanity import assessment_validation_ids
+    t = _tables()                                            # no ValidationSet sheet, as after an automatic survey
+    sel = assessment_validation_ids(t, cfg)
+    ids = list(sel["PDB ID"])
+    assert {"DIM1", "DIM2"} <= set(ids)                      # author-defined dimers define the canonical interface
+    assert "MONO" in ids and "EM1" in ids

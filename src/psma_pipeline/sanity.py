@@ -436,3 +436,37 @@ def run_assessment_checks(tables: dict[str, pd.DataFrame], summary: pd.DataFrame
     df = pd.DataFrame(rows)
     df.insert(1, "Critical", df["Check"].isin(set(critical)))
     return df
+
+
+def assessment_validation_ids(tables: dict[str, pd.DataFrame], cfg: Config, n_dimers: int = 3) -> pd.DataFrame:
+    """Validation set for the modelling assessment, chosen from the survey tables.
+
+    Always contains enough author-defined dimers to define the canonical
+    interface, plus the configured fixed IDs, every entry whose assembly is a
+    monomer (to test the crystal-lattice search) and the best cryo-EM entry.
+    Works whether or not the survey workbook has a ValidationSet sheet.
+    """
+    s = tables["Summary"]
+    present = set(s["PDB ID"])
+    order = tables.get("TemplateRanking", pd.DataFrame()).get("PDB ID", s["PDB ID"]).tolist()
+    rows: list[dict] = []
+
+    def add(pid: str, why: str) -> None:
+        if pid in present and pid not in {r["PDB ID"] for r in rows}:
+            rows.append({"PDB ID": pid, "Reason": why})
+
+    for pid in (tables.get("ValidationSet", pd.DataFrame()).get("PDB ID", pd.Series(dtype=str)).dropna()):
+        add(str(pid), "survey validation set")
+    for pid in cfg.get("validation_set.fixed_ids", []) or []:
+        add(pid.upper(), "validation_set.fixed_ids")
+    reason = s.set_index("PDB ID").get("Assembly choice reason", pd.Series(dtype=str))
+    state = s.set_index("PDB ID")["Monomer / dimer"]
+    author_dimers = [p for p in order if str(reason.get(p, "")).startswith("author") and state.get(p) == "dimer"]
+    for pid in author_dimers[:n_dimers]:
+        add(pid, "top-ranked author-defined dimer (defines the canonical interface)")
+    for pid in s[s["Monomer / dimer"] == "monomer"]["PDB ID"]:
+        add(pid, "assembly is a monomer (crystal-lattice search)")
+    em = s[s["Method"].astype(str).str.contains("ELECTRON")].sort_values("Resolution (Å)")
+    if len(em):
+        add(em["PDB ID"].iloc[0], "best-resolution cryo-EM entry")
+    return pd.DataFrame(rows)
