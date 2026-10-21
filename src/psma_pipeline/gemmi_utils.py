@@ -20,10 +20,26 @@ def one_letter(resname: str) -> str:
         return "X"
 
 
-def mark_pos(m: Any):
-    """Position of a NeighborSearch mark (the symmetry image), any gemmi version."""
-    import gemmi
-    return gemmi.Position(m.x, m.y, m.z)
+def mark_contact(st: Any, query_pos: Any, mark: Any, cra: Any) -> tuple[float, bool]:
+    """Distance from ``query_pos`` to a NeighborSearch hit, and whether the hit is an image.
+
+    ``mark.pos`` is the symmetry-transformed position *wrapped into the unit
+    cell*, so a plain ``query_pos.dist(mark.pos)`` can be wrong near cell
+    edges. For crystals the nearest periodic image is used
+    (``UnitCell.find_nearest_pbc_image(point, mark.pos, 0)``, as in the gemmi
+    documentation).
+
+    Returns
+    -------
+    (distance in Å, is_image)
+        ``is_image`` is True when the nearest copy is not the deposited atom
+        itself (another symmetry operation or a lattice translation).
+    """
+    direct = query_pos.dist(cra.atom.pos)
+    if not st.cell.is_crystal():
+        return direct, False
+    d = st.cell.find_nearest_pbc_image(query_pos, mark.pos, 0).dist()
+    return d, abs(direct - d) > 1e-3
 
 
 def res_key(chain: Any, res: Any) -> tuple:

@@ -19,7 +19,7 @@ Symmetry
 
 from __future__ import annotations
 
-from .gemmi_utils import (author_id, mark_pos, neighbor_search, res_key, residue_label,
+from .gemmi_utils import (author_id, mark_contact, neighbor_search, res_key, residue_label,
                           uniprot_mismatch, unp_maps)
 from .ligands import ADDITIVE, GLYCAN, classify_component, contact_cutoff, is_metal, is_metal_or_anion
 from .status import Status
@@ -80,15 +80,14 @@ def binding_site_analysis(pdb: str, ctx: dict, outliers: dict, classes: dict,
                 for m in ns.find_atoms(atom.pos, "\0", radius=cutoff):
                     cra = m.to_cra(model)
                     key = res_key(cra.chain, cra.residue)
-                    if key == own and m.image_idx == 0:
+                    d, sym = mark_contact(st, atom.pos, m, cra)
+                    if key == own and not sym:
                         continue
-                    d = atom.pos.dist(mark_pos(m))
                     if d > cutoff:
                         continue
-                    sym = m.image_idx != 0
                     if cra.residue.is_water():
                         water_pairs += 1
-                        water_ids.add((key, m.image_idx))
+                        water_ids.add((key, sym, round(d, 2) if sym else 0))
                         if shell:
                             coordination.append((f"HOH{cra.residue.seqid.num} O", d))
                         continue

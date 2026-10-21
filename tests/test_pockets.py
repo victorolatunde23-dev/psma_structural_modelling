@@ -124,5 +124,71 @@ def test_active_site_b_factors_and_occupancy(ctx):
     assert by["E424"]["Modelled"] is False
     assert by["H377"]["Matches UniProt"] is True and by["H377"]["Author residue number"] == "377"
     assert by["D387"]["Min occupancy"] == 0.5
-    assert by["H377"]["Normalised B (z)"] < 0 < by["D387"]["Normalised B (z)"]
+    # chain B values 20,20,30,30,40,40,50: mean 32.86, population SD 10.30
+    assert by["H377"]["Normalised B (z)"] == pytest.approx(-1.25, abs=0.01)
+    assert by["D387"]["Normalised B (z)"] == pytest.approx(-0.28, abs=0.01)
     assert by["H377"]["Chain (label)"] == "A" and by["H377"]["Entity"] == "1"
+
+
+MMCIF_EDGE = """data_EDGE
+_cell.length_a 20
+_cell.length_b 40
+_cell.length_c 40
+_cell.angle_alpha 90
+_cell.angle_beta 90
+_cell.angle_gamma 90
+_symmetry.space_group_name_H-M 'P 1'
+loop_
+_entity.id
+_entity.type
+1 polymer
+2 non-polymer
+loop_
+_entity_poly_seq.entity_id
+_entity_poly_seq.num
+_entity_poly_seq.mon_id
+1 1 HIS
+loop_
+_struct_asym.id
+_struct_asym.entity_id
+A 1
+B 2
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_alt_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_entity_id
+_atom_site.label_seq_id
+_atom_site.pdbx_PDB_ins_code
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.occupancy
+_atom_site.B_iso_or_equiv
+_atom_site.auth_seq_id
+_atom_site.auth_asym_id
+_atom_site.pdbx_PDB_model_num
+ATOM   1 N NE2 . HIS A 1 1 ? 18.60 20.00 20.00 1.00 20.0 377 A 1
+HETATM 2 ZN ZN  . ZN  B 2 . ? 0.50 20.00 20.00 1.00 25.0 801 A 1
+"""
+
+
+def test_contact_across_cell_edge_uses_nearest_image():
+    """Zn at x=0.5 and His NE2 at x=18.6 in a 20 Å cell are 1.9 Å apart through
+    the cell edge (18.1 Å directly): the contact must be found, with the
+    correct distance, and marked as a lattice image."""
+    gemmi = pytest.importorskip("gemmi")
+    from psma_pipeline.assemblies import coordinate_analysis
+    from psma_pipeline.pockets import binding_site_analysis
+    st = gemmi.make_structure_from_block(gemmi.cif.read_string(MMCIF_EDGE).sole_block())
+    st.setup_entities()
+    ctx = {"coords": coordinate_analysis(st, {"1"}), "segs": {"A": [SEGS["A"][0]]},
+           "method": "X-RAY DIFFRACTION", "resolution": 2.0}
+    cfg = load_config()
+    zn = binding_site_analysis("EDGE", ctx, {}, cfg.ligand_classes, cfg.require("contacts"), F.USEQ)[0]
+    assert dict(coordination_distances(zn))["H377/A* NE2"] == pytest.approx(1.90, abs=0.01)
+    assert zn["Symmetry-mate contact"] is True

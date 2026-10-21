@@ -10,7 +10,7 @@ Scientific rule: an observed crystallographic glycan is usually a fragment
 
 from __future__ import annotations
 
-from .gemmi_utils import mark_pos, neighbor_search, unp_maps
+from .gemmi_utils import mark_contact, neighbor_search, unp_maps
 from .ligands import GLYCAN, classify_component
 from .status import Status
 
@@ -41,7 +41,8 @@ def find_glycosylation_sites(pdb: str, ctx: dict, classes: dict, contacts_cfg: d
                 continue
             for m in ns.find_atoms(c1.pos, "\0", radius=link):
                 cra = m.to_cra(model)
-                if cra.residue.name == "ASN" and cra.atom.name == "ND2":
+                d, _ = mark_contact(st, c1.pos, m, cra)
+                if cra.residue.name == "ASN" and cra.atom.name == "ND2" and d <= link:
                     unp = l2u.get(cra.residue.subchain, {}).get(cra.residue.label_seq)
                     rows.append({
                         "PDB ID": pdb, "Model": coords.get("model_number", 1),
@@ -51,7 +52,7 @@ def find_glycosylation_sites(pdb: str, ctx: dict, classes: dict, contacts_cfg: d
                         "Asn (author)": f"{cra.residue.seqid.num}",
                         "Root sugar": f"{comp}{res.seqid.num}",
                         "Root sugar chain (label)": res.subchain,
-                        "C1-ND2 (Å)": round(c1.pos.dist(mark_pos(m)), 2),
+                        "C1-ND2 (Å)": round(d, 2),
                         "Root sugar mean B": round(sum(a.b_iso for a in res) / len(res), 1),
                         "Calculation status": (Status.OK if unp is not None else Status.WARNING).value,
                         "Warning": "" if unp is not None else "Asn has no UniProt mapping (tag or unmapped segment)",

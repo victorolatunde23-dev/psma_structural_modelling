@@ -29,6 +29,28 @@ section D.
 | Assembly choice when **only software-defined** assemblies exist | Picks the lowest-numbered software-defined assembly. The old code took the lowest RCSB ID by string sort, so `-10` sorted before `-2`. | Deterministic, numeric order, as in the brief. Identical to the old result whenever an author-defined assembly exists. |
 | Notes | More rows (assembly reason, schema variant, missing-value rule). | Documentation. |
 
+### Bug fix found by the gemmi tests in Colab (affects the original notebook too)
+
+`binding_site_analysis` and glycosylation detection read a neighbour-search
+hit's position as `mark.x/.y/.z`. Those attributes don't exist in current
+gemmi, so the step raised `AttributeError`. The pipeline caught the error and
+wrote it into `Summary → Warnings` as `binding sites: ...`, but the affected
+outputs were left empty:
+
+- the **BindingSites** and **Glycosylation** sheets;
+- **Max ligand B ratio**, **Glycosylated Asn**, **Arene-site contact** and **Largest ligand** in Summary;
+- **LidVsLigand**.
+
+The lid states, active-site B-factors, variability and ranking were **not**
+affected, because they use CA coordinates only.
+
+A second, subtler error was fixed at the same time. `mark.pos` is wrapped into
+the unit cell, so the distance to a symmetry or lattice copy could be wrong for
+atoms near a cell edge, and pure lattice-translation contacts were not flagged
+as symmetry contacts. Distances now use the nearest periodic image
+(`UnitCell.find_nearest_pbc_image`). A regression test covers a contact
+across a cell edge.
+
 ### Added columns
 - **Summary:**
   - `Assembly choice reason`, `Assembly copies source`, `RCSB assembly chain count`
