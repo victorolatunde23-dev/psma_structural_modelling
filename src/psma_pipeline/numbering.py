@@ -124,3 +124,58 @@ def construct_differences(seq: str, segs: list[dict], useq: str) -> dict:
         "mutations": ", ".join(muts), "gaps": "; ".join(gaps),
         "coverage": round(covered / len(useq), 3),
     }
+
+
+# ---------------------------------------------------------------------------
+# Sequence-based numbering (Milestone 4: predicted models have no SIFTS mapping)
+# ---------------------------------------------------------------------------
+def align_to_uniprot(seq: str, useq: str, match: float = 2.0, mismatch: float = -1.0,
+                     gap: float = -2.0) -> dict[int, int]:
+    """Map positions of ``seq`` (0-based) to UniProt numbers (1-based) of ``useq``.
+
+    Identical sequences and exact substrings (e.g. an ectodomain construct)
+    map directly. Otherwise a local (Smith–Waterman) alignment is used, so an
+    expression tag and the unmodelled part of UniProt can both be skipped at
+    no cost, while point mutations and internal gaps are tolerated.
+    Substituted positions keep their UniProt number; insertions and residues
+    outside the aligned segment are unmapped.
+    """
+    if not seq or not useq:
+        return {}
+    if seq == useq:
+        return {i: i + 1 for i in range(len(seq))}
+    off = useq.find(seq)
+    if off >= 0:
+        return {i: off + i + 1 for i in range(len(seq))}
+    import numpy as np
+
+    A = np.frombuffer(seq.encode(), np.uint8)
+    B = np.frombuffer(useq.encode(), np.uint8)
+    n, m = len(A), len(B)
+    H = np.zeros((n + 1, m + 1))
+    ptr = np.full((n + 1, m + 1), 3, np.int8)        # 0 diagonal, 1 up (gap in useq), 2 left (gap in seq), 3 start
+    j = np.arange(1, m + 1)
+    for i in range(1, n + 1):
+        diag = H[i - 1, :-1] + np.where(B == A[i - 1], match, mismatch)
+        up = H[i - 1, 1:] + gap
+        T = np.maximum(np.maximum(diag, up), 0.0)
+        tptr = np.where(T <= 0, 3, np.where(diag >= up, 0, 1)).astype(np.int8)
+        # left moves: H[j] = max_k<=j (T[k] + gap*(j-k)); H[i,0] = 0
+        base = np.concatenate([[0.0], T]) - gap * np.arange(m + 1)
+        row = np.maximum(T, np.maximum.accumulate(base)[1:] + gap * j)
+        H[i, 1:] = row
+        ptr[i, 1:] = np.where(row > T, 2, tptr)
+    i, k = np.unravel_index(int(np.argmax(H)), H.shape)
+    out = {}
+    while i > 0 and k > 0 and H[i, k] > 0:
+        p = ptr[i, k]
+        if p == 0:
+            out[int(i) - 1] = int(k)
+            i, k = i - 1, k - 1
+        elif p == 1:
+            i -= 1
+        elif p == 2:
+            k -= 1
+        else:
+            break
+    return out

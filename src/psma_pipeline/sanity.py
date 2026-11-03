@@ -554,3 +554,74 @@ def run_pocket_checks(tables: dict[str, pd.DataFrame], survey: dict[str, pd.Data
     df = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["Check", "Status", "PDB ID", "Chain", "Detail"])
     df.insert(1, "Critical", df["Check"].isin(critical))
     return df
+
+
+# ---------------------------------------------------------------------------
+# Milestone 4: AlphaFold comparison and membrane context
+# ---------------------------------------------------------------------------
+def run_alphafold_checks(tables: dict[str, pd.DataFrame], pae_checks: list[dict], cfg: Config,
+                         critical: Iterable[str] = ("pae_indexing", "numbering_identity")) -> pd.DataFrame:
+    """Sanity checks on the AlphaFold / membrane tables.
+
+    * pae_indexing (critical) – PAE square, sized to the residue index, contiguous chain blocks, small diagonal;
+    * numbering_identity (critical) – target chains align to UniProt (FAIL < 0.90, WARNING < min_identity);
+    * afdb_canonical_sequence – the AlphaFold DB model has the current UniProt canonical sequence;
+    * confident_dimer_rule – no dimer is 'confident' unless ipTM, interface PAE and canonical Jaccard all pass;
+    * glycans_extracellular – no N-glycosylation sequon placed below the outer membrane plane;
+    * tm_in_membrane – TM residues inside the fitted membrane;
+    * md_not_ready – the readiness table never reports READY in this milestone.
+    """
+    rows: list[dict] = []
+    for c in pae_checks:
+        rows.append({"Check": "pae_indexing", "Status": c["Status"], "PDB ID": c["Model ID"], "Chain": None,
+                     "Detail": c["Detail"]})
+    min_id = float(cfg.get("alphafold.min_identity", 0.95))
+    ch = tables.get("AFChains", pd.DataFrame())
+    if len(ch):
+        for _, r in ch[ch["Target"].astype(bool)].iterrows():
+            v = float(r["Identity to UniProt"])
+            st = Status.PASS if v >= min_id else (Status.WARNING if v >= 0.90 else Status.FAIL)
+            rows.append(_row("numbering_identity", st, f"identity {v:.3f} over {r['Mapped residues']} residues "
+                             f"({r['UniProt range']})", r["Model ID"], r["Chain"]))
+    mods = tables.get("AFModels", pd.DataFrame())
+    afdb = mods[mods["Source"] == "AlphaFold DB"] if len(mods) else mods
+    for _, r in afdb.iterrows():
+        canon = r.get("AFDB canonical sequence") is True or r.get("AFDB canonical sequence") == 1
+        rows.append(_row("afdb_canonical_sequence", Status.PASS if canon else Status.WARNING,
+                         f"{r.get('Version', '')}: " + ("sequence equals the UniProt canonical sequence" if canon else
+                                                        "AlphaFold DB sequence differs from the current UniProt canonical "
+                                                        "sequence (version mismatch?)"), r["Model ID"]))
+    ifs = tables.get("AFInterfaces", pd.DataFrame())
+    if len(ifs):
+        dcfg = cfg.get("alphafold.dimer", {})
+        for _, r in ifs.iterrows():
+            if r.get("Dimer confidence") != "confident":
+                continue
+            ok = (pd.notna(r.get("ipTM")) and r["ipTM"] >= float(dcfg.get("iptm_confident", 0.8))
+                  and pd.notna(r.get("Interface PAE (Å)")) and r["Interface PAE (Å)"] <= float(dcfg.get("interface_pae_confident", 5))
+                  and pd.notna(r.get("Canonical interface Jaccard"))
+                  and r["Canonical interface Jaccard"] >= float(dcfg.get("canonical_jaccard_min", 0.5)))
+            rows.append(_row("confident_dimer_rule", Status.PASS if ok else Status.FAIL,
+                             r.get("Dimer confidence reason", ""), r["Model ID"]))
+        if not (ifs["Dimer confidence"] == "confident").any():
+            rows.append(_row("confident_dimer_rule", Status.PASS,
+                             f"{len(ifs)} predicted interfaces, none called confident: "
+                             + ", ".join(sorted(set(ifs['Dimer confidence'].astype(str))))))
+    pl = tables.get("MembranePlacement", pd.DataFrame())
+    if len(pl) and "Sequons on wrong side" in pl:
+        min_tm = float(cfg.get("membrane.min_tm_in_slab", 0.8))
+        for _, r in pl[pl["Calculation status"] != Status.NOT_RUN.value].iterrows():
+            w = int(r["Sequons on wrong side"] or 0)
+            rows.append(_row("glycans_extracellular", Status.PASS if w == 0 else Status.WARNING,
+                             f"{w} sequons not above the outer plane", r["Model ID"]))
+            t = float(r["TM in slab"])
+            rows.append(_row("tm_in_membrane", Status.PASS if t >= min_tm else Status.WARNING,
+                             f"TM in slab {t:.2f} ({r['Placement method']})", r["Model ID"]))
+    rd = tables.get("MembraneMDReadiness", pd.DataFrame())
+    if len(rd):
+        overall = rd[rd["Item"] == "OVERALL"]["Status"].tolist()
+        rows.append(_row("md_not_ready", Status.PASS if overall and overall[0] != Status.PASS.value else Status.FAIL,
+                         "readiness overall = " + (overall[0] if overall else "missing")))
+    df = pd.DataFrame(rows, columns=["Check", "Status", "PDB ID", "Chain", "Detail"])
+    df.insert(1, "Critical", df["Check"].isin(set(critical)))
+    return df

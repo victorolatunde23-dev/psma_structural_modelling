@@ -37,3 +37,17 @@ entrance_lid:
     low_confidence_resolution: 3.5   # Å; calls from worse structures are downgraded
     ligand_size_bins: [-1, 0, 20, 35, 1000000000]
     ligand_size_labels: ["none", "small (≤20)", "medium (21-35)", "large (>35)"]
+
+# Domain architecture (UniProt numbering) used by Milestone 4 confidence, PAE and
+# RMSD tables. Ectodomain domains after Davis et al. 2005 (PNAS 102:5981) and
+# Mesters et al. 2006 (EMBO J 25:1375) - verify against the papers you cite.
+# Membrane topology itself is read from UniProt (and optionally DeepTMHMM);
+# the first three entries below only label the tables.
+domains:
+  "cytoplasmic tail 1-19": [1, 19]
+  "transmembrane helix 20-43": [20, 43]
+  "stalk 44-56": [44, 56]
+  "protease domain 57-116": [57, 116]
+  "apical domain 117-351": [117, 351]
+  "protease domain 352-590": [352, 590]
+  "C-terminal (dimerisation) domain 591-750": [591, 750]

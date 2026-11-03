@@ -28,6 +28,7 @@ outputs:
   survey_workbook: "{accession}_structures.xlsx"
   assessment_workbook: "{accession}_modelling_assessment.xlsx"
   pocket_workbook: "{accession}_pockets_waters_variants.xlsx"
+  alphafold_workbook: "{accession}_alphafold_membrane.xlsx"   # Milestone 4 + membrane context
   write_csv: true
   write_parquet: true               # skipped with a warning if pyarrow is missing
   manifest: "{accession}_manifest.json"
@@ -54,6 +55,7 @@ endpoints:
   emdb_entry: https://www.ebi.ac.uk/emdb/api/entry/{emdb}
   rcsb_chem_comp: https://data.rcsb.org/graphql
   ebi_variation: https://www.ebi.ac.uk/proteins/api/variation/{acc}
+  afdb_prediction: https://alphafold.ebi.ac.uk/api/prediction/{acc}   # Milestone 4
 
 structure:
   # first = model 1 only (default). all = every model of NMR ensembles
@@ -300,3 +302,92 @@ variants:                       # Milestone 3: sequence-variant mapping
   exposed_rsa_min: 0.40
   high_variability_rmsf: 1.0    # Å, per-residue CA RMSF above this = high structural variability
   near_distance: 6.0            # Å, "near" active site / ligand / metal / interface
+
+alphafold:                      # Milestone 4: AlphaFold / ColabFold / AlphaFold 3 models
+  use_afdb: true                # fetch the current AlphaFold DB model for target.accession
+  plddt_bands: [90, 70, 50]     # very high / confident / low / very low boundaries
+  confident_plddt: 70           # "confident core" used for superposition and RMSD
+  min_identity: 0.95            # model chain vs UniProt on aligned residues; below = WARNING
+  min_identity_target: 0.50     # below this a chain is not treated as the target
+  pae_diagonal_max: 1.5         # Å; median PAE diagonal above this = misindexed matrix (FAIL)
+  compare:
+    top_n: 5                    # experimental references = top N of TemplateRanking ...
+    include_lid_calibration: true   # ... plus the entrance-lid calibration structures
+    min_common_ca: 50
+    gdt_cutoffs: [1, 2, 4, 8]   # Å
+  dimer:                        # confident-dimer rule (all three must hold)
+    iptm_confident: 0.8
+    iptm_low: 0.6
+    interface_pae_confident: 5.0    # Å, mean PAE over interface residue pairs
+    interface_pae_low: 10.0
+    canonical_jaccard_min: 0.5      # residue Jaccard to the experimental canonical interface
+  ranking:
+    modes:
+      ectodomain_template:
+        description: Ectodomain modelling template (confident and close to experiment)
+        include: {}
+        exclude: {}
+        criteria:
+          - {column: "Mean pLDDT ectodomain",          direction: higher, weight: 2}
+          - {column: "Core CA RMSD to best template (Å)", direction: lower, weight: 2}
+          - {column: "TM-score to best template",      direction: higher, weight: 1}
+        missing: worst
+      active_site:
+        description: Active-site geometry (Zn ligands and literature residues)
+        include: {}
+        exclude: {}
+        criteria:
+          - {column: "Mean pLDDT active site",          direction: higher, weight: 1}
+          - {column: "Zn-ligand side-chain RMSD (Å)",   direction: lower,  weight: 2}
+          - {column: "Active-site side-chain RMSD (Å)", direction: lower,  weight: 1}
+        missing: worst
+      dimer:
+        description: Dimer model (confident and canonical interface)
+        include: {"Model kind": "multimer"}
+        exclude: {}
+        criteria:
+          - {column: "ipTM",                           direction: higher, weight: 2}
+          - {column: "Interface PAE (Å)",              direction: lower,  weight: 2}
+          - {column: "Canonical interface Jaccard",    direction: higher, weight: 2}
+        missing: worst
+      membrane_anchor:
+        description: Membrane-anchored starting model (confident TM helix, consistent placement)
+        include: {}
+        exclude: {"Orientation reliability": "unsupported"}
+        criteria:
+          - {column: "Mean pLDDT TM",                  direction: higher, weight: 2}
+          - {column: "TM in slab",                     direction: higher, weight: 1}
+          - {column: "TM-ectodomain PAE (Å)",          direction: lower,  weight: 1}
+          - {column: "Ectodomain atoms in slab",       direction: lower,  weight: 1}
+          - {column: "Mean pLDDT ectodomain",          direction: higher, weight: 1}
+        missing: worst
+      membrane_dimer:
+        description: Membrane-anchored dimer for MD (membrane_anchor + symmetry consistency)
+        include: {"Model kind": "multimer"}
+        exclude: {"Orientation reliability": "unsupported"}
+        criteria:
+          - {column: "Mean pLDDT TM",                  direction: higher, weight: 2}
+          - {column: "C2 axis to membrane normal (°)", direction: lower,  weight: 2}
+          - {column: "TM in slab",                     direction: higher, weight: 1}
+          - {column: "Ectodomain atoms in slab",       direction: lower,  weight: 1}
+          - {column: "ipTM",                           direction: higher, weight: 1}
+        missing: worst
+
+membrane:                       # membrane and construct context (checklist item 15)
+  topology_source: consensus    # uniprot | deeptmhmm | consensus (agreeing residues; else UniProt)
+  deeptmhmm:
+    enabled: true               # needs the tmfold package and BioLib access; else NOT RUN
+  ectodomain_core_start: 57     # first residue counted as ectodomain for clearance / PAE (after the stalk)
+  c2_max_angle_deg: 20          # dimer C2 axis vs membrane normal; above = WARNING
+  c2_constrained_placement: true    # dimers: refit the membrane with the normal fixed to the C2 axis
+  tm_ecto_pae_reliable: 10.0    # Å; mean TM–ectodomain PAE above this = orientation not determined
+  min_tm_in_slab: 0.8
+  builder:                      # membrane-ready inputs (NOT MD-ready until Milestones 5–6)
+    lipids: "POPC:CHL1"         # ASSUMPTION placeholder - choose a composition for your system
+    ratio: "7:3"
+    salt_molar: 0.15
+    cation: "Na+"
+    anion: "Cl-"
+    water_margin_A: 17.5        # solvent above/below the protein
+    lateral_margin_A: 15.0      # lipid margin around the protein
+    force_field_note: "CHARMM36m / Lipid21 - choose in Milestone 6"

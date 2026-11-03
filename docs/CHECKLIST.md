@@ -29,14 +29,14 @@ Status key:
 | 8 | Ten ranking modes with filters, weights, missing policy, explanations; ligand-conditioned ranking | `ranking.py`, `assessment.py`, `pocket_analysis.rank_for_ligand`, config | ✅ offline; 🟡 ligand-conditioned on real data |
 | 4 | Pocket fingerprints (binary, weighted, typed), sub-pocket occupancy, similarity, clustering with diagnostics, ligand chemistry | `fingerprints.py`, `ligand_chem.py`, `pocket_analysis.py` | ✅ offline; ✅ Colab full run (169 ligand instances, 81 entries; RDKit descriptors 76/77, carborane DGQ unparseable) |
 | 14 | Conserved waters (superposition, complete-linkage clustering, Zn bridging, retain/consider/remove) | `waters.py` | ✅ offline; ✅ Colab: 77 sites, catalytic Zn-bridging water found in 54/77 (Zn–O 1.87 Å) |
-| 6 | Variant mapping (UniProt, optional EBI Proteins API; reference check; RSA, distances, RMSF, sequons, disulfides; hypotheses only) | `variants.py` | ✅ offline; ✅ Colab: 33 UniProt substitutions, 0 reference failures; AlphaFold columns M4 |
-| 7 | AlphaFold / ColabFold import and comparison | `alphafold.py` | ⬜ M4 |
+| 6 | Variant mapping (UniProt, optional EBI Proteins API; reference check; RSA, distances, RMSF, sequons, disulfides; hypotheses only) | `variants.py` | ✅ offline; ✅ Colab: 33 UniProt substitutions, 0 reference failures; ✅ AlphaFold columns (`alphafold.variant_alphafold_columns`, notebook 03 §H) |
+| 7 | AlphaFold DB / AlphaFold 3 / ColabFold import; UniProt numbering by alignment; PAE indexing incl. AF3 tokens (critical check); pLDDT/PAE per residue, region, domain; comparison with experiment (core RMSD, TM-score, GDT-like, regions, active site, pLDDT calibration, lid); multimer interfaces and confident-dimer rule; AF rankings | `alphafold.py`, `numbering.py`, `sanity.run_alphafold_checks` | ✅ offline (incl. PAE chain-boundary and confident-dimer tests); 🟡 AF3 mmCIF test needs gemmi; 🟡 real data in Colab |
 | 9 | Structure-repair assessment and rebuilding | `model_preparation.py` | ⬜ M5 |
 | 10 | Protonation and H-bond network | `model_preparation.py` | ⬜ M5 |
 | 11 | Binuclear Zn site and MD parameterisation metadata | `metal_sites.py` | ⬜ M5 |
 | 12 | Ligand preparation and parameter provenance | `model_preparation.py` | ⬜ M5 |
 | 13 | Glycosylation (composition, strategies) | `glycans.py` | 🟠 site detection done; M5 for the rest |
-| 15 | Membrane and construct context | `model_preparation.py` | ⬜ M5 |
+| 15 | Membrane and construct context | `membrane.py` (membrane part), `model_preparation.py` (M5) | 🟠 membrane part ✅ offline: UniProt/DeepTMHMM topology, C2-constrained placement, membrane QC, construct context, membrane-ready CHARMM-GUI/packmol-memgen inputs + readiness (never READY); 🟡 real data in Colab; construct repairs ⬜ M5 |
 | 16 | MD-readiness validator | `md_readiness.py` | ⬜ M6 |
 | 17 | MD system setup (engine-agnostic, OpenMM) | `md_readiness.py`, `config/md_protocol.yaml` | ⬜ M6 |
 | 18 | Trajectory analysis | `trajectory_analysis.py` | ⬜ M7 |

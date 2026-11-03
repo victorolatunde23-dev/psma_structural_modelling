@@ -154,3 +154,36 @@ The CSV/Parquet tables and the interface Jaccard matrix are also written. The su
 - **Catalytic pocket definition.** The survey's active-site set includes UniProt Ca/Cl binding sites, so the water region and the variants' "distance to active site" covered a much larger area (e.g. V627L at 1.3 Å from the "active site", 39 Å from Zn). Waters and variants now use the *catalytic pocket*: literature residues + Zn ligands + sub-pockets. The column is renamed `Distance to catalytic pocket (Å)`. Superposition still uses the broader set.
 - **DBSCAN.** eps 0.4 merged 79/84 ligands into one cluster. Default eps is now 0.25, and the diagnostics report eps 0.2–0.4.
 - **TAM** (a tris analogue, buffer) is now an additive. This also removes it from the ligands of interest in notebook 01.
+
+
+## Milestone 4 — AlphaFold comparison and membrane context (v0.4.0)
+
+**New output:** `outputs/<ACC>_alphafold_membrane.xlsx` (notebook 03 or `scripts/run_alphafold.py`), plus
+`alphafold_tables/`, `md_membrane_inputs/<model>/` and `alphafold_inputs/` (an AlphaFold Server job for the dimer).
+The sheets are:
+- AFModels, AFChains, AFResidueConfidence, AFRegionConfidence, AFDomainPAE
+- AFvsExperimental, AFRegionRMSD, AFEntranceLid
+- AFInterfaces, AFInterfaceContacts, AFRankings, AFRankingTop
+- MembraneTopology, TopologyComparison, MembranePlacement, ConstructContext, MembraneMDReadiness
+- VariantAlphaFold (when the pockets workbook exists)
+- AlphaFoldChecks, AlphaFoldIssues, Software, Reproducibility, DataDictionary
+
+The full design is in `docs/M4_ALPHAFOLD_MEMBRANE.md`.
+
+**Design decisions:**
+- **AlphaFold DB is the default model source.** It is the current release, fetched by accession. Both the current API field names and the names retired in June 2026 are read.
+- **AlphaFold 3 is imported, never run.** Its weights are not freely downloadable, so AF3 / AlphaFold Server results are uploaded. The notebook writes a server job for the dimer with Zn²⁺.
+- **Predicted models are numbered by local alignment to UniProt** (`numbering.align_to_uniprot`), because they have no SIFTS mapping. The critical `numbering_identity` check enforces it.
+- **PAE is indexed by `(chain, residue)` key.** AF3 token matrices with ion, glycan or ligand tokens cannot shift rows. This is enforced by the critical `pae_indexing` check, and the chain-boundary tests are the exit criterion.
+- **Superposition uses the confident core** (pLDDT ≥ 70). RMSD is reported over the core and over all common residues, with pLDDT–deviation calibration.
+- **The confident-dimer rule** requires all three of: ipTM ≥ 0.8, interface PAE ≤ 5 Å, and Jaccard ≥ 0.5 to the canonical interface. A missing criterion means *uncertain*.
+- **Membrane placement uses the sequence topology.** For dimers, the normal is constrained to the C2 axis. The TM–ectodomain PAE decides whether the model *determines* the ectodomain's orientation at all.
+- **Membrane-ready inputs are written for the top-ranked model.** A dimer is used only when its call is *confident*. The readiness table is never READY, and the lipid composition is a placeholder recorded as an assumption.
+
+**Changed in earlier stages:**
+- `VariantStructureMapping` AlphaFold columns can now be filled (`variant_alphafold_columns`). They are written to the new VariantAlphaFold sheet; the pockets workbook is not rewritten.
+- `pyproject.toml`: new optional extra `membrane` (tmfold, py3Dmol).
+
+**Bugs found during development:**
+- **`tmfold` alignment.** A semi-global alignment cannot skip *both* an expression tag and the unmodelled start of UniProt, so a tag on a mid-sequence construct was forced onto the preceding residues as mismatches. `align_to_uniprot` and `tmfold` now use a local alignment, with regression tests in both repositories.
+- **`tmfold` membrane thickness.** The loop penalty was a fraction of *all* loop residues, so PSMA's ~700-residue ectodomain diluted it. Ties between offsets also resolved to the first offset rather than the thinnest slab, so the fitted slab grew to its 40 Å limit. The penalty is now per residue relative to the TM count, and ties go to the thinnest slab (36 Å for a 24-residue helix). Regression tests were added in both repositories.

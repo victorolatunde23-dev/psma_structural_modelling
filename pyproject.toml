@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "psma-pipeline"
-version = "0.3.0"
+version = "0.4.0"
 description = "Structural-bioinformatics pipeline for PSMA / GCPII (UniProt Q04609): PDB survey, modelling assessment, MD preparation and analysis"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,6 +27,7 @@ dependencies = [
 structure = ["biopython>=1.81", "freesasa>=2.2"]
 chem = ["rdkit>=2023.3"]
 alphafold = ["tmtools>=0.2"]
+membrane = ["tmfold @ git+https://github.com/victorolatunde23-dev/DeepTMHMM_Pipeline", "py3Dmol>=2.0"]
 prep = ["openmm>=8.0", "propka>=3.5", "pdb2pqr>=3.6"]
 md = ["MDAnalysis>=2.6"]
 io = ["pyarrow>=12"]
