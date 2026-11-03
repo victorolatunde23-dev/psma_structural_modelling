@@ -411,11 +411,14 @@ def _select_md_model(res: Any, top: pd.DataFrame) -> tuple[str | None, str]:
     skipped = [f"{m} ({conf.get(m) or 'not assessed'})" for m in t["Model ID"]]
     t = top[top["Ranking mode"] == "membrane_anchor"].sort_values("Rank")
     for mid in t["Model ID"]:
-        if summ.loc[mid, "Model kind"] == "monomer" or not len(t[t["Model ID"] != mid]):
+        if summ.loc[mid, "Model kind"] == "monomer":
             why = "membrane_anchor ranking"
             if skipped:
                 why += "; dimer models not used because none is confident: " + ", ".join(skipped)
             return mid, why
+    for mid in t["Model ID"]:   # no monomer available: use the best dimer, flagged
+        return mid, (f"membrane_anchor ranking; no monomer available, so the dimer is used although it is "
+                     f"not confident ({conf.get(mid) or 'not assessed'}) - dimer not used as confirmed")
     return None, ""
 
 

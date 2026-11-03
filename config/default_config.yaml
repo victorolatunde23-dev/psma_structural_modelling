@@ -303,8 +303,30 @@ variants:                       # Milestone 3: sequence-variant mapping
   high_variability_rmsf: 1.0    # Å, per-residue CA RMSF above this = high structural variability
   near_distance: 6.0            # Å, "near" active site / ligand / metal / interface
 
-alphafold:                      # Milestone 4: AlphaFold / ColabFold / AlphaFold 3 models
+alphafold:                      # Milestone 4: AlphaFold DB + AlphaFold2 run in Colab (ColabFold)
   use_afdb: true                # fetch the current AlphaFold DB model for target.accession
+  colabfold:                    # AlphaFold2 / AlphaFold2-multimer run inside Colab (colabfold_run.py)
+    msa_mode: mmseqs2_uniref_env    # MSAs from the ColabFold MMseqs2 server
+    model_type: auto                # auto = alphafold2_ptm (monomer) / alphafold2_multimer_v3 (complex)
+    pair_mode: unpaired_paired
+    num_models: 3                   # of 5 AF2 models; more = better ranking but longer (each ~15-40 min for the dimer on a T4)
+    num_recycle: 6                  # null = ColabFold default (up to 20 for multimer, with early stop)
+    num_seeds: 1
+    templates: false                # PDB templates via the MMseqs2 server
+    amber: false                    # relaxation needs OpenMM; structure preparation belongs to Milestone 5
+    jobs:
+      dimer:                        # full-length homodimer: TM helices + ectodomain, for the C2-constrained membrane fit
+        enabled: true
+        copies: 2
+        start: 1
+        end: null
+      monomer:                      # full-length monomer (AlphaFold DB already provides one)
+        enabled: false
+        copies: 1
+      ectodomain_dimer:             # 44-750 x 2: closer to the experimental constructs, no membrane anchor
+        enabled: false
+        copies: 2
+        start: 44
   plddt_bands: [90, 70, 50]     # very high / confident / low / very low boundaries
   confident_plddt: 70           # "confident core" used for superposition and RMSD
   min_identity: 0.95            # model chain vs UniProt on aligned residues; below = WARNING

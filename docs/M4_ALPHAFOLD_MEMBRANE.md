@@ -10,48 +10,46 @@ files are never overwritten, every assumption lives in `config/`, every column i
 dictionary), and the additions listed in §6 below.
 
 Code: `src/psma_pipeline/alphafold.py`, `src/psma_pipeline/membrane.py`.
-Notebook: `notebooks/03_alphafold_comparison.ipynb`. Script: `scripts/run_alphafold.py`.
+Notebook: `notebooks/03_alphafold_comparison.ipynb`. AlphaFold2 runner: `src/psma_pipeline/colabfold_run.py`. Script: `scripts/run_alphafold.py`.
 Workbook: `outputs/<ACC>_alphafold_membrane.xlsx`.
 
 ---
 
-## 1. Model sources
+## 1. Model sources (everything runs in Colab)
 
 | Source | How it is obtained | Confidence data |
 |---|---|---|
-| **AlphaFold DB** (current release; v6 at the time of writing) | `GET /api/prediction/{accession}`. The entry whose sequence equals the UniProt canonical sequence is preferred. Both the current field names (`modelEntityId`, `sequenceStart`, `sequence`, …) and the names retired in June 2026 (`entryId`, `uniprotStart`, `uniprotSequence`, …) are accepted. | pLDDT (B-factor column) and PAE (`paeDocUrl`) |
-| **ColabFold** (AlphaFold2, monomer or multimer) | A results folder or zip uploaded by the user | `*_scores_rank_NNN_*.json`: `plddt`, `pae`, `ptm`, `iptm` |
-| **AlphaFold 3** (AlphaFold Server or a local AF3 install) | A results zip or folder uploaded by the user | `*_full_data_N.json` / `*_confidences.json`: `pae`, `token_chain_ids`, `token_res_ids`, `atom_plddts`; `*_summary_confidences*.json`: `ptm`, `iptm`, `ranking_score`, `chain_pair_iptm`, `chain_pair_pae_min`, `has_clash`, `fraction_disordered` |
-| **Any other model** (PDB or mmCIF) | A file uploaded by the user | pLDDT if the B-factor column holds it (declared by the user) |
+| **AlphaFold DB** (current release; v6 at the time of writing) — monomer | `GET /api/prediction/{accession}`. The entry whose sequence equals the UniProt canonical sequence is preferred. Both the current field names (`modelEntityId`, `sequenceStart`, `sequence`, …) and the names retired in June 2026 (`entryId`, `uniprotStart`, `uniprotSequence`, …) are accepted. | pLDDT (B-factor column) and PAE (`paeDocUrl`) |
+| **AlphaFold2-multimer v3, run in Colab** (ColabFold) — full-length dimer by default | `colabfold_run.run_colabfold_jobs`: installs ColabFold into the session, builds the MSA with the ColabFold MMseqs2 server, and runs `colabfold_batch` on the Colab GPU. Jobs are configured in `alphafold.colabfold.jobs` (dimer on; full-length monomer and 44–750 ectodomain dimer available). | `*_scores_rank_NNN_*.json`: `plddt`, `pae`, `ptm`, `iptm` |
+| Other ColabFold results / any PDB or mmCIF model | Added from disk or uploaded (optional) | pLDDT if the B-factor column holds it (declared by the user) |
 
-AlphaFold 3 model weights are not freely downloadable, so AF3 predictions are always imported,
-never run. Every imported file is hashed (SHA-256) into the manifest. Original files are copied
-into the cache and never modified.
+**Why AlphaFold2 and not AlphaFold 3.** The whole job stays in Colab. AlphaFold 3 weights are not freely downloadable, and AlphaFold Server is a separate web service. AlphaFold2-multimer runs on a Colab GPU and predicts the full-length dimer, including both TM helices, which the C2-constrained membrane placement needs.
+
+**What that costs.** AlphaFold2 does not model Zn²⁺ or glycans. Both were going to be added in Milestone 5 anyway, and both are listed as blockers in the readiness table.
+
+**Running it.**
+- The defaults are 3 of the 5 AlphaFold2 models, 6 recycles, no templates and no Amber relaxation. Relaxation is structure preparation, which belongs to Milestone 5.
+- On a T4, expect roughly 15–40 min per dimer model.
+- Results are written to the cache (Google Drive in Colab), so a disconnected run resumes. Finished jobs are skipped, and the ColabFold command line is recorded.
+- Result folders are read in place, never copied.
 
 ## 2. Numbering and PAE indexing (exit criterion)
 
 * **Numbering.** Every model chain is aligned to the UniProt canonical sequence:
-  - identical sequences and exact substrings (for example an ectodomain construct 44–750) map
+  - identical sequences and exact substrings (for example the 44–750 ectodomain dimer) map
     directly;
-  - anything else uses a semi-global alignment, which tolerates tags, mutations and gaps.
+  - anything else uses a local alignment, which skips tags and tolerates mutations and gaps.
 
   All downstream tables use UniProt numbering, the same as the survey. Chains with less than
   95 % identity on aligned residues are flagged. A chain below 50 % identity is not treated as
   the target.
-* **PAE.** AlphaFold 3 PAE matrices are indexed by **token**, not residue. Ions, ligands, glycans
-  and modified residues are extra tokens. So a Zn²⁺ added to the input shifts every later row if
-  the matrix is read naively by residue. The importer:
-  - builds a `(chain, residue number, residue name)` key for every token from `token_chain_ids`
-    and `token_res_ids`;
-  - keeps only polymer tokens of target chains, collapsing multi-token residues;
-  - maps them to UniProt numbering.
-
-  ColabFold multimer PAE is residue-indexed, with chains concatenated in input order. Chain
-  boundaries come from the model file and are checked against the matrix size.
+* **PAE.** AlphaFold2 PAE is residue-indexed, with chains concatenated in input order. Rows are
+  mapped to `(chain, UniProt number)` from the model's own residue order, and residues without a
+  UniProt mapping (tags) are dropped.
 * **Critical check `pae_indexing`.** It fails when:
   - the matrix is not square;
-  - its size disagrees with the number of tokens or residues;
-  - a target chain's block is not contiguous;
+  - its size disagrees with the model's polymer residues;
+  - a chain block is not contiguous, or not in UniProt order;
   - the diagonal is not near its minimum (a sign of a misaligned matrix).
 
 ## 3. Comparison with experimental structures
@@ -72,7 +70,7 @@ structures):
 
 ## 4. Multimers and the confident-dimer rule (exit criterion)
 
-For multimer models (ColabFold multimer, AlphaFold 3), every target–target chain pair is
+For multimer models (AlphaFold2-multimer), every target–target chain pair is
 analysed with the existing interface code (`interfaces.analyse_interface`):
 - contacts and typed interactions;
 - buried surface area;
@@ -81,7 +79,7 @@ analysed with the existing interface code (`interfaces.analyse_interface`):
 Interface PAE is the mean of the PAE over interface residue pairs, in both directions.
 
 A dimer is called **confident** only when **all three** of these hold (`alphafold.dimer`):
-- ipTM (or `chain_pair_iptm`) ≥ 0.8;
+- ipTM ≥ 0.8;
 - mean interface PAE ≤ 5 Å;
 - residue Jaccard to the canonical interface ≥ 0.5.
 
@@ -186,8 +184,8 @@ explanations as the template rankings), with the model ID as the key. Modes, in
 
 ## 9. Improvements over a plain AlphaFold comparison
 
-1. Token-level PAE indexing that is safe for AF3 inputs with ions and glycans, enforced by a
-   critical check.
+1. The complete prediction runs in Colab: AlphaFold DB plus an AlphaFold2-multimer dimer, run on
+   the Colab GPU and resumable. PAE indexing and chain blocks are enforced by a critical check.
 2. A core-fitted RMSD plus pLDDT-calibration statistics, so a confident but wrong region is
    visible.
 3. The confident-dimer rule requires agreement with the experimental canonical interface, not

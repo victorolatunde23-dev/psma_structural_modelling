@@ -159,7 +159,7 @@ The CSV/Parquet tables and the interface Jaccard matrix are also written. The su
 ## Milestone 4 — AlphaFold comparison and membrane context (v0.4.0)
 
 **New output:** `outputs/<ACC>_alphafold_membrane.xlsx` (notebook 03 or `scripts/run_alphafold.py`), plus
-`alphafold_tables/`, `md_membrane_inputs/<model>/` and `alphafold_inputs/` (an AlphaFold Server job for the dimer).
+`alphafold_tables/` and `md_membrane_inputs/<model>/`. AlphaFold2 results are written to `cache/alphafold/colabfold/<job>/`.
 The sheets are:
 - AFModels, AFChains, AFResidueConfidence, AFRegionConfidence, AFDomainPAE
 - AFvsExperimental, AFRegionRMSD, AFEntranceLid
@@ -172,9 +172,9 @@ The full design is in `docs/M4_ALPHAFOLD_MEMBRANE.md`.
 
 **Design decisions:**
 - **AlphaFold DB is the default model source.** It is the current release, fetched by accession. Both the current API field names and the names retired in June 2026 are read.
-- **AlphaFold 3 is imported, never run.** Its weights are not freely downloadable, so AF3 / AlphaFold Server results are uploaded. The notebook writes a server job for the dimer with Zn²⁺.
+- **The whole job stays in Colab.** AlphaFold2-multimer v3 runs on the Colab GPU through ColabFold (`colabfold_run.py`) for the full-length dimer, and it is resumable. AlphaFold 3 is not used: its weights are not freely available, and AlphaFold Server is outside Colab. AlphaFold2 does not model Zn²⁺ or glycans; both are Milestone 5 blockers in the readiness table.
 - **Predicted models are numbered by local alignment to UniProt** (`numbering.align_to_uniprot`), because they have no SIFTS mapping. The critical `numbering_identity` check enforces it.
-- **PAE is indexed by `(chain, residue)` key.** AF3 token matrices with ion, glycan or ligand tokens cannot shift rows. This is enforced by the critical `pae_indexing` check, and the chain-boundary tests are the exit criterion.
+- **PAE is indexed by `(chain, residue)` key.** The matrix size and chain blocks must match the model. This is enforced by the critical `pae_indexing` check, and the chain-boundary tests are the exit criterion.
 - **Superposition uses the confident core** (pLDDT ≥ 70). RMSD is reported over the core and over all common residues, with pLDDT–deviation calibration.
 - **The confident-dimer rule** requires all three of: ipTM ≥ 0.8, interface PAE ≤ 5 Å, and Jaccard ≥ 0.5 to the canonical interface. A missing criterion means *uncertain*.
 - **Membrane placement uses the sequence topology.** For dimers, the normal is constrained to the C2 axis. The TM–ectodomain PAE decides whether the model *determines* the ectodomain's orientation at all.

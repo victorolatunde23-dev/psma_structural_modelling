@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Command-line equivalent of notebooks/03_alphafold_comparison.ipynb (Milestone 4 + membrane context).
 
-    python scripts/run_alphafold.py                                   # AlphaFold DB model only
-    python scripts/run_alphafold.py --af3 fold_psma_dimer.zip --colabfold cf_results.zip
-    python scripts/run_alphafold.py --model my_model.pdb --plddt-in-b --no-deeptmhmm --tag test
+    python scripts/run_alphafold.py                      # AlphaFold DB model only
+    python scripts/run_alphafold.py --run-af2            # + run the configured AlphaFold2 jobs (ColabFold, GPU)
+    python scripts/run_alphafold.py --colabfold cf_results.zip --model my_model.pdb --plddt-in-b --tag test
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from psma_pipeline import load_config, setup_logging  # noqa: E402
 from psma_pipeline.alphafold import run_alphafold, save_alphafold  # noqa: E402
 from psma_pipeline.assessment import load_survey_tables  # noqa: E402
+from psma_pipeline.status import IssueLog  # noqa: E402
 from psma_pipeline.sanity import critical_failures  # noqa: E402
 
 
@@ -26,7 +27,8 @@ def main() -> int:
     ap.add_argument("--overrides")
     ap.add_argument("--survey", help="survey workbook from notebook 01")
     ap.add_argument("--assessment", help="assessment workbook from notebook 02 (canonical interface)")
-    ap.add_argument("--af3", nargs="*", default=[], help="AlphaFold 3 / AlphaFold Server result zips or folders")
+    ap.add_argument("--run-af2", action="store_true",
+                    help="run the alphafold.colabfold jobs with ColabFold first (installs it if missing; needs a GPU)")
     ap.add_argument("--colabfold", nargs="*", default=[], help="ColabFold result zips or folders")
     ap.add_argument("--model", nargs="*", default=[], help="other PDB/mmCIF models")
     ap.add_argument("--plddt-in-b", action="store_true", help="--model files hold pLDDT in the B-factor column")
@@ -41,9 +43,19 @@ def main() -> int:
     survey = load_survey_tables(args.survey or cfg.output_file("survey_workbook"))
     a_path = Path(args.assessment) if args.assessment else cfg.output_file("assessment_workbook")
     assessment = load_survey_tables(a_path) if a_path.exists() else None
-    uploads = ([{"kind": "af3", "path": p} for p in args.af3] + [{"kind": "colabfold", "path": p} for p in args.colabfold]
-               + [{"kind": "model", "path": p, "plddt_in_b": args.plddt_in_b} for p in args.model])
-    res = run_alphafold(cfg, survey, assessment, uploads=uploads, use_afdb=not args.no_afdb)
+    issues = IssueLog()
+    uploads = []
+    if args.run_af2:
+        from psma_pipeline.cache import session_from_config
+        from psma_pipeline.colabfold_run import install_colabfold, run_colabfold_jobs
+        from psma_pipeline.uniprot import uniprot_entry, uniprot_info
+        install_colabfold()
+        useq = uniprot_info(uniprot_entry(session_from_config(cfg), cfg.accession, cfg.cache_dir,
+                                          cfg.endpoint("uniprot_json")))[0]
+        uploads += run_colabfold_jobs(cfg, useq, issues)
+    uploads += ([{"kind": "colabfold", "path": p} for p in args.colabfold]
+                + [{"kind": "model", "path": p, "plddt_in_b": args.plddt_in_b} for p in args.model])
+    res = run_alphafold(cfg, survey, assessment, uploads=uploads, use_afdb=not args.no_afdb, issues=issues)
     paths = save_alphafold(cfg, res, tag=args.tag)
     checks = res.tables["AlphaFoldChecks"]
     print(checks.groupby(["Check", "Status"]).size().to_string())

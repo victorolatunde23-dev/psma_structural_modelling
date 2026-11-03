@@ -19,7 +19,7 @@ for every component and [`docs/PLAN.md`](docs/PLAN.md) for the full plan.
 |---|---|---|
 | `01_structure_survey.ipynb` | PDB survey, cross-check, assemblies, ligands, validation, lid states, template ranking | **M1 ✔** |
 | `02_interface_pocket_validation.ipynb` | part 1: dimer interfaces, crystal contacts, local map-model fit, ranking modes (**M2 ✔**); part 2: pocket fingerprints, ligand clustering, ligand-conditioned ranking, conserved waters, variants (**M3 ✔**) | M2–M3 |
-| `03_alphafold_comparison.ipynb` | AlphaFold DB / AlphaFold 3 / ColabFold import, confidence, comparison with experiment, confident-dimer rule, AF rankings; membrane topology, placement and QC; membrane-ready MD inputs ([design](docs/M4_ALPHAFOLD_MEMBRANE.md)) | **M4 ✔** (Colab run pending) |
+| `03_alphafold_comparison.ipynb` | AlphaFold DB model + AlphaFold2-multimer dimer **run in Colab** (ColabFold); confidence, comparison with experiment, confident-dimer rule, AF rankings; membrane topology, placement and QC; membrane-ready MD inputs ([design](docs/M4_ALPHAFOLD_MEMBRANE.md)) | **M4 ✔** (Colab run pending) |
 | `04_model_preparation.ipynb` | repairs, protonation, Zn site, ligands, glycans, construct context | M5 |
 | `05_md_system_setup.ipynb` | force fields, parameter provenance, solvation, MD readiness | M6 |
 | `06_md_trajectory_analysis.ipynb` | stability, interfaces, Zn geometry, lid dynamics, convergence | M7 |
@@ -59,7 +59,7 @@ src/psma_pipeline/
   validation.py   ranking.py   survey.py   sanity.py   manifest.py   excel_output.py
   structure_atoms.py   sasa.py   interfaces.py   local_fit.py   assessment.py   (M2)
   fingerprints.py   ligand_chem.py   waters.py   variants.py   pocket_analysis.py   (M3)
-  alphafold.py   membrane.py   (M4 + membrane context)
+  alphafold.py   colabfold_run.py   membrane.py   (M4 + membrane context)
 notebooks/    one notebook per stage (explanation + plots; no calculations)
 scripts/      run_survey.py, run_assessment.py, run_pockets.py, run_alphafold.py (command-line equivalents of notebooks 01–03)
 tests/        pytest suite (offline; gemmi tests skip without gemmi; network tests opt-in)
@@ -71,7 +71,7 @@ data/ cache/ outputs/   (contents not tracked)
 
 - **Biological assembly vs ASU.** The oligomeric state comes from the biological assembly's generators, never from the number of chains in the asymmetric unit.
 - **UniProt numbering only through SIFTS** for experimental structures. Author, label_seq and UniProt numbering are kept in separately labelled columns. Predicted models have no SIFTS mapping, so they are numbered by sequence alignment to UniProt, and the critical `numbering_identity` check enforces it.
-- **PAE is indexed by residue key, never by position.** AlphaFold 3 token matrices (ions, glycans, ligands) are reduced by `(chain, residue)` key, enforced by the critical `pae_indexing` check.
+- **PAE is indexed by residue key, never by position.** The matrix size and chain blocks must match the model, enforced by the critical `pae_indexing` check.
 - **A confident dimer must also be the experimental dimer.** ipTM and interface PAE are not enough: the confident-dimer rule also requires agreement with the canonical interface.
 - **Membrane-ready is not MD-ready.** The MD readiness table is never READY before Milestones 5–6.
 - **Configured residues are checked.** Every configured residue is validated against the canonical sequence. Mismatches are dropped and reported.

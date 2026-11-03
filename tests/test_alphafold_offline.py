@@ -1,7 +1,7 @@
 """Milestone 4 and membrane context: offline tests (synthetic models, no network, no gemmi).
 
-Covers the exit criteria: PAE indexing and chain boundaries (including AlphaFold 3
-token matrices with ion and glycan tokens), and the confident-dimer rule.
+Covers the exit criteria: PAE indexing and chain boundaries, and the confident-dimer rule,
+plus AlphaFold2 run inside Colab (ColabFold, faked) through to membrane-ready inputs.
 """
 
 from __future__ import annotations
@@ -74,25 +74,6 @@ def test_residue_pae_matrix_chain_boundaries(tmp_path):
         AF.pae_from_residue_matrix(pae[:-1, :-1], atoms)
 
 
-def test_af3_token_pae_ignores_ion_and_glycan_tokens(tmp_path):
-    """Zn and glycan tokens sit between the two chains; naive residue indexing would shift chain B."""
-    atoms = _dimer_atoms(tmp_path)
-    chains = ["A"] * 750 + ["C", "C"] + ["D"] * 14 + ["B"] * 750      # 2 Zn tokens, 14 glycan atom tokens
-    resid = list(range(1, 751)) + [1, 2] + [1] * 14 + list(range(1, 751))
-    code = {"A": 1, "B": 2, "C": 7, "D": 9}
-    n = len(chains)
-    raw = np.array([[code[chains[i]] * 1000 + resid[i] + code[chains[j]] * 0.1 for j in range(n)] for i in range(n)])
-    np.fill_diagonal(raw, 0.2)
-    sub, idx = AF.pae_from_tokens(raw, chains, resid, atoms)
-    assert len(idx) == 1500 and idx[750] == ("B", 1)
-    assert sub[750, 0] == pytest.approx(2001.1)               # row chain B res 1, column chain A
-    assert sub[10, 760] == pytest.approx(1011.2)
-    with pytest.raises(ValueError, match="tokens"):
-        AF.pae_from_tokens(raw[:-1, :-1], chains, resid, atoms)
-    with pytest.raises(ValueError, match="no PAE token"):
-        AF.pae_from_tokens(raw[: n - 5, : n - 5], chains[:-5], resid[:-5], atoms)
-
-
 def test_pae_index_check_detects_problems(tmp_path):
     atoms = _dimer_atoms(tmp_path)
     m = AF.AFModel("T", "test", "multimer", atoms)
@@ -157,7 +138,7 @@ def test_load_afdb_field_names(acfg, tmp_path, monkeypatch, fields):
     assert issues.count(Status.FAIL) == 0
 
 
-def test_colabfold_and_af3_folders(acfg, tmp_path):
+def test_colabfold_result_folder(acfg, tmp_path):
     a = A.protomer_ca()
     cf = tmp_path / "cf"
     cf.mkdir()
@@ -228,6 +209,10 @@ def test_md_model_selection_requires_confident_dimer():
         mid, why = _select_md_model(SimpleNamespace(tables={"AFModels": summ}), top)
         assert mid == expected, (conf, why)
         assert ("not used" in why) == (expected == "M")
+    # only a non-confident dimer available: it is used, and the reason says it is not confirmed
+    summ = pd.DataFrame({"Model ID": ["D"], "Model kind": ["multimer"], "Dimer confidence": ["uncertain"]})
+    mid, why = _select_md_model(SimpleNamespace(tables={"AFModels": summ}), top[top["Model ID"] == "D"])
+    assert mid == "D" and "no monomer available" in why and "not used as confirmed" in why
 
 
 def test_c2_misalignment_warns(acfg, tmp_path):
@@ -316,36 +301,6 @@ def test_run_alphafold_end_to_end(acfg, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# gemmi-only (runs in Colab): AlphaFold 3 Server folder read from mmCIF
-# ---------------------------------------------------------------------------
-def test_af3_server_folder_with_ion_tokens(acfg, tmp_path):
-    gemmi = pytest.importorskip("gemmi")
-    a = A.protomer_ca()
-    st = gemmi.read_pdb_string(A.pdb_text({"A": a, "B": A.c2_image(a)}, F.USEQ, A.plddt_profile()))
-    st.setup_entities()
-    job = tmp_path / "fold_psma_dimer"
-    job.mkdir()
-    doc = st.make_mmcif_document()
-    doc.write_file(str(job / "fold_psma_dimer_model_0.cif"))
-    chains = ["A"] * 750 + ["B"] * 750 + ["C", "D"]           # two Zn ion tokens after the protein chains
-    resid = list(range(1, 751)) * 2 + [1, 1]
-    pae = np.full((1502, 1502), 3.0)
-    np.fill_diagonal(pae, 0.4)
-    (job / "fold_psma_dimer_full_data_0.json").write_text(json.dumps(
-        {"pae": pae.round(2).tolist(), "token_chain_ids": chains, "token_res_ids": resid}))
-    (job / "fold_psma_dimer_summary_confidences_0.json").write_text(json.dumps(
-        {"ptm": 0.82, "iptm": 0.86, "ranking_score": 0.9, "has_clash": 0.0, "fraction_disordered": 0.05,
-         "chain_pair_iptm": [[0.8, 0.86, 0.5, 0.5], [0.86, 0.8, 0.5, 0.5], [0.5] * 4, [0.5] * 4]}))
-    issues = IssueLog()
-    models = AF.load_af3(job, F.USEQ, acfg, issues)
-    assert len(models) == 1 and issues.count(Status.FAIL) == 0
-    m = models[0]
-    assert m.kind == "multimer" and m.pae.shape == (1500, 1500) and m.pae_tokens == 1502
-    assert AF.pae_index_check(m)["Status"] == "PASS"
-    assert AF._pair_iptm(m, "A", "B") == pytest.approx(0.86)
-
-
-# ---------------------------------------------------------------------------
 # network (opt-in: PSMA_NETWORK_TESTS=1): the real AlphaFold DB entry for Q04609
 # ---------------------------------------------------------------------------
 @pytest.mark.network
@@ -362,19 +317,104 @@ def test_afdb_q04609_network(acfg):
     assert models[0].chain_info[0]["UniProt range"] == f"1-{len(useq)}"
 
 
-def test_alphafold_server_job_and_upload_detection(tmp_path):
+def test_upload_detection(tmp_path):
     import zipfile
-    job = AF.alphafold_server_job(F.USEQ, "psma_dimer_zn", copies=2, zn_per_copy=2)
-    assert job[0]["dialect"] == "alphafoldserver"
-    assert job[0]["sequences"][0]["proteinChain"]["count"] == 2
-    assert job[0]["sequences"][1] == {"ion": {"ion": "ZN", "count": 4}}
-    ecto = AF.alphafold_server_job(F.USEQ, "ecto", copies=1, zn_per_copy=0, start=44)
-    assert len(ecto[0]["sequences"]) == 1 and len(ecto[0]["sequences"][0]["proteinChain"]["sequence"]) == 707
-    z1 = tmp_path / "af3.zip"
-    with zipfile.ZipFile(z1, "w") as z:
-        z.writestr("fold_x/fold_x_summary_confidences_0.json", "{}")
     z2 = tmp_path / "cf.zip"
     with zipfile.ZipFile(z2, "w") as z:
         z.writestr("x_scores_rank_001_alphafold2_ptm_model_1_seed_000.json", "{}")
-    assert AF.detect_upload_kind(z1) == "af3" and AF.detect_upload_kind(z2) == "colabfold"
+    assert AF.detect_upload_kind(z2) == "colabfold"
     assert AF.detect_upload_kind(tmp_path / "model.pdb") == "model"
+
+
+# ---------------------------------------------------------------------------
+# AlphaFold2 inside Colab (ColabFold): fake colabfold_batch with ColabFold's real output names
+# ---------------------------------------------------------------------------
+FAKE_COLABFOLD = r'''#!{python}
+import json, sys
+from pathlib import Path
+sys.path[:0] = [{tests!r}, {src!r}]
+import af_fixtures as A, fixtures as F
+args = sys.argv[1:]
+fasta, out = Path(args[-2]), Path(args[-1])
+n = int(args[args.index("--num-models") + 1])
+job = fasta.stem
+seq = fasta.read_text().split("\n")[1]
+chains = seq.split(":")
+out.mkdir(parents=True, exist_ok=True)
+a = A.protomer_ca()
+xyz = {{"A": a, "B": A.c2_image(a)}} if len(chains) == 2 else {{"A": a}}
+lens = [750] * len(chains)
+for r in range(1, n + 1):
+    tag = f"rank_{{r:03d}}_alphafold2_multimer_v3_model_{{r}}_seed_000"
+    (out / f"{{job}}_unrelaxed_{{tag}}.pdb").write_text(A.pdb_text(xyz, F.USEQ, A.plddt_profile()))
+    (out / f"{{job}}_scores_{{tag}}.json").write_text(json.dumps(
+        {{"ptm": 0.8, "iptm": 0.9 - 0.05 * r, "pae": A.pae_matrix(750, lens).round(1).tolist()}}))
+(out / f"{{job}}.done.txt").write_text("")
+(Path(str(out)) / "calls.txt").open("a").write(" ".join(args) + "\n")
+'''
+
+
+@pytest.fixture
+def fake_colabfold(tmp_path, monkeypatch):
+    import os
+    import stat
+    import sys
+    from pathlib import Path as P
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    exe = bindir / "colabfold_batch"
+    here = P(__file__).resolve().parent
+    exe.write_text(FAKE_COLABFOLD.format(python=sys.executable, tests=str(here), src=str(here.parent / "src")))
+    exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    return exe
+
+
+def test_colabfold_query_and_command(acfg):
+    from psma_pipeline.colabfold_run import colabfold_command, job_sequence
+    s = job_sequence(F.USEQ, copies=2)
+    assert s.count(":") == 1 and len(s) == 2 * 750 + 1
+    assert len(job_sequence(F.USEQ, 2, start=44)) == 2 * 707 + 1
+    cmd = colabfold_command(__import__("pathlib").Path("d.fasta"), __import__("pathlib").Path("o"),
+                            acfg.get("alphafold.colabfold"))
+    assert cmd[0] == "colabfold_batch" and cmd[-2:] == ["d.fasta", "o"]
+    assert cmd[cmd.index("--num-models") + 1] == "3" and "--amber" not in cmd
+
+
+def test_colabfold_run_resume_and_import(acfg, fake_colabfold):
+    from psma_pipeline.colabfold_run import run_colabfold_jobs
+    issues = IssueLog()
+    jobs = {"dimer": {"copies": 2, "num_models": 2}}
+    ups = run_colabfold_jobs(acfg, F.USEQ, issues, jobs=jobs)
+    assert len(ups) == 1 and ups[0]["stage"] is False and issues.count(Status.FAIL) == 0
+    calls = acfg.cache_dir / "alphafold" / "colabfold" / "dimer" / "calls.txt"
+    assert len(calls.read_text().splitlines()) == 1
+    run_colabfold_jobs(acfg, F.USEQ, issues, jobs=jobs)                     # resumed run: job skipped
+    assert len(calls.read_text().splitlines()) == 1
+    models = AF.load_upload(ups[0], F.USEQ, acfg, issues)
+    assert [m.model_id for m in models] == ["CF:dimer:rank_001", "CF:dimer:rank_002"]
+    m = models[0]
+    assert m.source == "ColabFold (AlphaFold2)" and m.kind == "multimer" and m.meta["Model"].startswith("alphafold2_multimer_v3")
+    assert m.scores["iptm"] == pytest.approx(0.85) and AF.pae_index_check(m)["Status"] == "PASS"
+
+
+def test_colabfold_missing_is_not_run(acfg, monkeypatch):
+    from psma_pipeline import colabfold_run as CR
+    monkeypatch.setattr(CR, "colabfold_available", lambda: False)
+    issues = IssueLog()
+    assert CR.run_colabfold_jobs(acfg, F.USEQ, issues, jobs={"x": {"copies": 1}}) == []
+    assert issues.count(Status.NOT_RUN) == 1
+
+
+def test_end_to_end_with_alphafold2_dimer(acfg, fake_colabfold):
+    """AlphaFold2-multimer run in 'Colab' -> import -> membrane (C2-constrained) -> MD inputs."""
+    from psma_pipeline.alphafold import run_alphafold
+    from psma_pipeline.colabfold_run import run_colabfold_jobs
+    ups = run_colabfold_jobs(acfg, F.USEQ, IssueLog(), jobs={"dimer": {"copies": 2, "num_models": 1}})
+    assessment = {"CanonicalInterface": pd.DataFrame({"Item": ["canonical residues"], "Value": ["600, 601"]})}
+    res = run_alphafold(acfg, _survey_tables(), assessment, uploads=ups, use_afdb=False,
+                        refs={("REF1", "A"): A.reference_atoms()}, uniprot=A.uniprot_entry_with_topology())
+    pl = res.tables["MembranePlacement"].set_index("Model ID").loc["CF:dimer:rank_001"]
+    assert pl["Placement method"].startswith("C2-axis constrained") and pl["Membrane thickness (Å)"] <= 36
+    assert res.tables["AFInterfaces"].iloc[0]["ipTM"] == pytest.approx(0.85)
+    assert (res.tables["AlphaFoldChecks"].query("Critical")["Status"] == "PASS").all()

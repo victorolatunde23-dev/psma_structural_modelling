@@ -1,4 +1,4 @@
-"""AlphaFold / ColabFold / AlphaFold 3 import, confidence and comparison (Milestone 4).
+"""AlphaFold DB and AlphaFold2 (ColabFold) import, confidence and comparison (Milestone 4).
 
 Design: ``docs/M4_ALPHAFOLD_MEMBRANE.md``.
 
@@ -9,13 +9,12 @@ Every model becomes an :class:`AFModel` holding
   B = pLDDT), plus ``copy`` / ``protomer`` so the Milestone 2 interface code
   works on it unchanged;
 * a residue-level PAE matrix whose rows/columns are listed in ``pae_index``
-  as ``(chain, UniProt number)``. AlphaFold 3 token matrices are reduced to
-  target polymer residues by token key, never by position, so ions, ligands
-  and glycans in the input cannot shift the indexing.
+  as ``(chain, UniProt number)``; the matrix size and chain blocks are checked
+  against the model (critical check ``pae_indexing``).
 
 Sources: the AlphaFold Protein Structure Database (current release, fetched by
-accession), ColabFold result folders/zips, AlphaFold 3 / AlphaFold Server
-result folders/zips, and any PDB/mmCIF model.
+accession), AlphaFold2 / AlphaFold2-multimer run inside Colab by
+:mod:`colabfold_run` (or any other ColabFold result), and any PDB/mmCIF model.
 """
 
 from __future__ import annotations
@@ -55,7 +54,7 @@ class AFModel:
     """One predicted model with confidence data, in UniProt numbering."""
 
     model_id: str
-    source: str                       # AlphaFold DB | ColabFold | AlphaFold 3 | user model
+    source: str                       # AlphaFold DB | ColabFold (AlphaFold2) | user model
     kind: str                         # monomer | multimer
     atoms: pd.DataFrame
     pae: np.ndarray | None = None
@@ -65,7 +64,6 @@ class AFModel:
     chain_info: list[dict] = field(default_factory=list)
     plddt_in_b: bool = True
     pae_raw_shape: tuple | None = None
-    pae_tokens: int | None = None
 
     @property
     def target_chains(self) -> list[str]:
@@ -227,39 +225,6 @@ def pae_from_residue_matrix(pae: np.ndarray, atoms: pd.DataFrame) -> tuple[np.nd
     return pae[np.ix_(idx, idx)], [k for _, k in keep]
 
 
-def pae_from_tokens(pae: np.ndarray, token_chain_ids: list, token_res_ids: list,
-                    atoms: pd.DataFrame) -> tuple[np.ndarray, list[tuple[str, int]]]:
-    """AlphaFold 3 token-indexed PAE reduced to target polymer residues.
-
-    Each target residue takes the first token with the same ``(chain, residue
-    number)``; ion, ligand and glycan tokens are dropped. Raises ValueError when
-    the token arrays disagree with the matrix or a target residue has no token.
-    """
-    n = len(token_chain_ids)
-    if pae.ndim != 2 or pae.shape[0] != pae.shape[1]:
-        raise ValueError(f"PAE matrix is not square: {pae.shape}")
-    if pae.shape[0] != n or len(token_res_ids) != n:
-        raise ValueError(f"PAE size {pae.shape[0]} != tokens ({n} chain ids, {len(token_res_ids)} residue ids)")
-    first: dict[tuple[str, int], int] = {}
-    for i, (c, r) in enumerate(zip(token_chain_ids, token_res_ids)):
-        first.setdefault((str(c), int(r)), i)
-    unp = _unp_of_residues(atoms)
-    idx, keys, missing = [], [], []
-    for k in residue_order(atoms):
-        u = unp.get((k[0], k[1], k[2]))
-        if u is None:
-            continue
-        t = first.get((k[0], int(k[1])))
-        if t is None:
-            missing.append(f"{k[0]}:{k[1]}")
-            continue
-        idx.append(t)
-        keys.append((k[0], u))
-    if missing:
-        raise ValueError(f"{len(missing)} target residues have no PAE token (e.g. {', '.join(missing[:5])})")
-    return pae[np.ix_(idx, idx)], keys
-
-
 def _unp_of_residues(atoms: pd.DataFrame) -> dict[tuple, int | None]:
     t = atoms[atoms["polymer"] & atoms["target"]].drop_duplicates(["chain", "resnum", "icode"])
     return {(c, n, i): (int(u) if pd.notna(u) else None) for c, n, i, u in zip(t["chain"], t["resnum"], t["icode"], t["unp"])}
@@ -287,8 +252,7 @@ def pae_index_check(m: AFModel, diagonal_max: float = 1.5) -> dict:
         diag = np.diag(m.pae)
         if np.median(diag) > diagonal_max:
             problems.append(f"median diagonal {np.median(diag):.2f} Å > {diagonal_max} (misaligned matrix?)")
-    detail = "; ".join(problems) or (f"{len(m.pae_index)} residues, chains {', '.join(dict.fromkeys(chains))}"
-                                     + (f", from {m.pae_tokens} tokens" if m.pae_tokens else ""))
+    detail = "; ".join(problems) or f"{len(m.pae_index)} residues, chains {', '.join(dict.fromkeys(chains))}"
     return {**row, "Status": (Status.FAIL if problems else Status.PASS).value, "Detail": detail}
 
 
@@ -308,16 +272,12 @@ def _finish(m: AFModel, useq: str, acfg: dict, issues: IssueLog) -> AFModel:
     return m
 
 
-def _set_pae(m: AFModel, pae: np.ndarray | None, issues: IssueLog, tokens: tuple | None = None) -> None:
+def _set_pae(m: AFModel, pae: np.ndarray | None, issues: IssueLog) -> None:
     if pae is None:
         return
     m.pae_raw_shape = tuple(pae.shape)
     try:
-        if tokens is not None:
-            m.pae, m.pae_index = pae_from_tokens(pae, tokens[0], tokens[1], m.atoms)
-            m.pae_tokens = len(tokens[0])
-        else:
-            m.pae, m.pae_index = pae_from_residue_matrix(pae, m.atoms)
+        m.pae, m.pae_index = pae_from_residue_matrix(pae, m.atoms)
     except ValueError as ex:
         m.pae, m.pae_index = None, []
         m.meta["PAE problem"] = str(ex)
@@ -417,9 +377,14 @@ def _find(root: Path, *patterns: str) -> list[Path]:
     return []
 
 
-def load_colabfold(path: str | Path, useq: str, cfg: Any, issues: IssueLog, label: str | None = None) -> list[AFModel]:
-    """Every ranked model of a ColabFold result (monomer or multimer)."""
-    root = _stage(path, cfg.cache_dir / "alphafold" / "imports")
+def load_colabfold(path: str | Path, useq: str, cfg: Any, issues: IssueLog, label: str | None = None,
+                   stage: bool = True) -> list[AFModel]:
+    """Every ranked model of a ColabFold (AlphaFold2 / AlphaFold2-multimer) result.
+
+    ``stage=False`` reads a result folder in place (runs made in this session by
+    :mod:`colabfold_run`, so a resumed run with more models is never read from a stale copy).
+    """
+    root = Path(path) if not stage and Path(path).is_dir() else _stage(path, cfg.cache_dir / "alphafold" / "imports")
     label = label or root.name
     models = []
     pdbs = _find(root, "*_relaxed_rank_*.pdb") or _find(root, "*_unrelaxed_rank_*.pdb")
@@ -430,10 +395,12 @@ def load_colabfold(path: str | Path, useq: str, cfg: Any, issues: IssueLog, labe
         tag = mm.group(1) if mm else pdb.stem
         scores = _find(root, f"*_scores_rank_{rank:03d}_*.json") if rank is not None else []
         data = json.loads(scores[0].read_text()) if scores else {}
+        mtype = re.search(r"(alphafold2(?:_multimer_v\d|_ptm)?)", pdb.name)
         m = AFModel(f"CF:{label}:rank_{rank:03d}" if rank is not None else f"CF:{label}:{pdb.stem}",
-                    "ColabFold", "monomer", read_model_atoms(pdb),
+                    "ColabFold (AlphaFold2)", "monomer", read_model_atoms(pdb),
                     scores={k: data.get(k) for k in ("ptm", "iptm", "max_pae") if data.get(k) is not None},
-                    meta={"Rank": rank, "Model": tag, "File": str(pdb), "SHA-256": sha256_file(pdb),
+                    meta={"Rank": rank, "Model": (f"{mtype.group(1)} " if mtype else "") + tag,
+                          "File": str(pdb), "SHA-256": sha256_file(pdb),
                           "Relaxed": "_relaxed_" in pdb.name and "_unrelaxed_" not in pdb.name,
                           "Scores file": str(scores[0]) if scores else ""})
         _finish(m, useq, cfg.get("alphafold", {}), issues)
@@ -444,61 +411,6 @@ def load_colabfold(path: str | Path, useq: str, cfg: Any, issues: IssueLog, labe
         models.append(m)
     if not models:
         issues.add("alphafold", Status.FAIL, f"no ColabFold rank_* PDB files in {path}")
-    return models
-
-
-def load_af3(path: str | Path, useq: str, cfg: Any, issues: IssueLog, label: str | None = None) -> list[AFModel]:
-    """Every model of an AlphaFold 3 result (AlphaFold Server zip/folder or local AF3 output)."""
-    root = _stage(path, cfg.cache_dir / "alphafold" / "imports")
-    label = label or root.name
-    models = []
-    server = _find(root, "*_model_[0-9].cif", "*_model_[0-9][0-9].cif")
-    if server:
-        items = []
-        for cif in server:
-            n = re.search(r"_model_(\d+)\.cif$", cif.name).group(1)
-            stem = cif.name[: -len(f"_model_{n}.cif")]
-            items.append((f"model_{n}", cif, cif.parent / f"{stem}_full_data_{n}.json",
-                          cif.parent / f"{stem}_summary_confidences_{n}.json"))
-    else:  # local AF3: <job>_model.cif (top) and seed-*_sample-*/model.cif
-        items = []
-        for cif in _find(root, "*_model.cif", "model.cif") + _find(root, "*/model.cif"):
-            if any(cif == i[1] for i in items):
-                continue
-            d = cif.parent
-            tag = "top" if cif.name.endswith("_model.cif") else d.name
-            pref = cif.name[: -len("model.cif")]
-            items.append((tag, cif, d / f"{pref}confidences.json", d / f"{pref}summary_confidences.json"))
-    for tag, cif, full, summ in items:
-        try:
-            atoms = read_model_atoms(cif)
-        except ImportError as ex:
-            issues.add("alphafold", Status.NOT_RUN, str(ex), pdb_id=f"AF3:{label}:{tag}")
-            continue
-        sdata = json.loads(summ.read_text()) if summ.exists() else {}
-        m = AFModel(f"AF3:{label}:{tag}", "AlphaFold 3", "monomer", atoms,
-                    scores={k: sdata.get(k) for k in ("ptm", "iptm", "ranking_score", "fraction_disordered",
-                                                     "has_clash", "chain_pair_iptm", "chain_pair_pae_min",
-                                                     "chain_ptm") if sdata.get(k) is not None},
-                    meta={"Model": tag, "File": str(cif), "SHA-256": sha256_file(cif),
-                          "Confidences file": str(full) if full.exists() else ""})
-        _finish(m, useq, cfg.get("alphafold", {}), issues)
-        if full.exists():
-            fdata = json.loads(full.read_text())
-            pae = _pae_array(fdata)
-            toks = (fdata.get("token_chain_ids"), fdata.get("token_res_ids"))
-            if pae is not None and toks[0] is not None and toks[1] is not None:
-                _set_pae(m, pae, issues, tokens=toks)
-            elif pae is not None:
-                issues.add("alphafold", Status.FAIL, "AF3 PAE without token_chain_ids/token_res_ids: not indexed",
-                           pdb_id=m.model_id)
-        else:
-            issues.add("alphafold", Status.WARNING, "no AF3 confidences JSON: PAE unavailable", pdb_id=m.model_id)
-        # chain order of chain_pair_iptm follows the model's chain order
-        m.meta["AF3 chain order"] = list(dict.fromkeys(atoms["chain"]))
-        models.append(m)
-    if not models:
-        issues.add("alphafold", Status.FAIL, f"no AlphaFold 3 model .cif files in {path}")
     return models
 
 
@@ -515,12 +427,10 @@ def load_user_model(path: str | Path, useq: str, cfg: Any, issues: IssueLog, lab
 
 
 def load_upload(item: dict, useq: str, cfg: Any, issues: IssueLog) -> list[AFModel]:
-    """``{"kind": "af3" | "colabfold" | "model", "path": ..., "label": ..., "plddt_in_b": bool}``."""
+    """``{"kind": "colabfold" | "model", "path": ..., "label": ..., "plddt_in_b": bool}``."""
     kind = item.get("kind")
-    if kind == "af3":
-        return load_af3(item["path"], useq, cfg, issues, item.get("label"))
     if kind == "colabfold":
-        return load_colabfold(item["path"], useq, cfg, issues, item.get("label"))
+        return load_colabfold(item["path"], useq, cfg, issues, item.get("label"), bool(item.get("stage", True)))
     if kind == "model":
         return load_user_model(item["path"], useq, cfg, issues, item.get("label"),
                                bool(item.get("plddt_in_b", False)), item.get("pae_json"))
@@ -826,13 +736,7 @@ def confident_dimer_call(iptm: float | None, ipae: float | None, jac: float | No
 
 
 def _pair_iptm(m: AFModel, c1: str, c2: str) -> float | None:
-    cp = m.scores.get("chain_pair_iptm")
-    order = m.meta.get("AF3 chain order") or []
-    if cp is not None and c1 in order and c2 in order:
-        try:
-            return float(cp[order.index(c1)][order.index(c2)])
-        except (IndexError, TypeError, ValueError):
-            pass
+    """AlphaFold2-multimer reports one ipTM for the complex (a homodimer has one chain pair)."""
     v = m.scores.get("iptm")
     return float(v) if v is not None else None
 
@@ -917,8 +821,6 @@ def model_summary(models: list[AFModel], regions: dict[str, set[int]], cfg: Any,
                "Mean pLDDT active site": per.get("active site"),
                "Mean pLDDT entrance lid": next((v for k, v in per.items() if "lid" in k), None),
                "pTM": m.scores.get("ptm"), "ipTM": m.scores.get("iptm"),
-               "Ranking score": m.scores.get("ranking_score"), "Has clash": m.scores.get("has_clash"),
-               "Fraction disordered": m.scores.get("fraction_disordered"),
                "pLDDT in B-factor": m.plddt_in_b,
                "AFDB canonical sequence": m.meta.get("Canonical sequence") if m.source == "AlphaFold DB" else None,
                "PAE status": next((c["Status"] for c in checks if c["Model ID"] == m.model_id), ""),
@@ -1036,7 +938,8 @@ def run_alphafold(cfg: Any, survey: dict[str, pd.DataFrame], assessment: dict[st
         Tables from notebooks 01 and 02 (the assessment workbook supplies the
         canonical interface; without it the dimer rule's third criterion is NOT RUN).
     uploads:
-        ``[{"kind": "af3" | "colabfold" | "model", "path": ..., "label": ...}]``.
+        ``[{"kind": "colabfold" | "model", "path": ..., "label": ...}]``; AlphaFold2 runs made
+        in Colab by :func:`colabfold_run.run_colabfold_jobs` return this format.
     refs:
         Pre-loaded reference atom tables (tests); default loads them with gemmi.
     """
@@ -1162,23 +1065,8 @@ def save_alphafold(cfg: Any, res: AlphaFoldResults, tag: str = "") -> dict[str, 
     return out
 
 
-def alphafold_server_job(useq: str, name: str, copies: int = 2, zn_per_copy: int = 2,
-                         start: int = 1, end: int | None = None) -> list[dict]:
-    """AlphaFold Server job JSON (``dialect: alphafoldserver``) for the target, e.g. the PSMA dimer with Zn²⁺.
-
-    Upload the written file on alphafoldserver.com (Submit job → Upload JSON), then import the
-    downloaded result zip with ``{"kind": "af3", "path": ...}``. Check the JSON against the
-    server's current documentation if the upload is rejected.
-    """
-    seq = useq[start - 1:end] if end else useq[start - 1:]
-    seqs: list[dict] = [{"proteinChain": {"sequence": seq, "count": int(copies)}}]
-    if zn_per_copy:
-        seqs.append({"ion": {"ion": "ZN", "count": int(copies * zn_per_copy)}})
-    return [{"name": name, "modelSeeds": [], "sequences": seqs, "dialect": "alphafoldserver", "version": 1}]
-
-
 def detect_upload_kind(path: str | Path) -> str:
-    """Guess af3 / colabfold / model for an uploaded file or folder from its contents."""
+    """Guess colabfold / model for an uploaded file or folder from its contents."""
     path = Path(path)
     names: list[str] = []
     if path.is_dir():
@@ -1188,8 +1076,6 @@ def detect_upload_kind(path: str | Path) -> str:
             names = [Path(n).name for n in z.namelist()]
     else:
         return "model"
-    if any("summary_confidences" in n or n.endswith("_model_0.cif") for n in names):
-        return "af3"
     if any("_scores_rank_" in n for n in names):
         return "colabfold"
     return "model"
