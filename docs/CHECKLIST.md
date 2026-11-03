@@ -31,12 +31,12 @@ Status key:
 | 14 | Conserved waters (superposition, complete-linkage clustering, Zn bridging, retain/consider/remove) | `waters.py` | ✅ offline; ✅ Colab: 77 sites, catalytic Zn-bridging water found in 54/77 (Zn–O 1.87 Å) |
 | 6 | Variant mapping (UniProt, optional EBI Proteins API; reference check; RSA, distances, RMSF, sequons, disulfides; hypotheses only) | `variants.py` | ✅ offline; ✅ Colab: 33 UniProt substitutions, 0 reference failures; ✅ AlphaFold columns (`alphafold.variant_alphafold_columns`, notebook 03 §H) |
 | 7 | AlphaFold DB import and AlphaFold2 / AlphaFold2-multimer run inside Colab (ColabFold, resumable); UniProt numbering by alignment; PAE indexing and chain blocks (critical check); pLDDT/PAE per residue, region, domain; comparison with experiment (core RMSD, TM-score, GDT-like, regions, active site, pLDDT calibration, lid); multimer interfaces and confident-dimer rule; AF rankings | `alphafold.py`, `colabfold_run.py`, `numbering.py`, `sanity.run_alphafold_checks` | ✅ offline (incl. PAE chain-boundary and confident-dimer tests; AlphaFold2 run faked end to end); 🟡 real AlphaFold2 run and data in Colab |
-| 9 | Structure-repair assessment and rebuilding | `model_preparation.py` | ⬜ M5 |
-| 10 | Protonation and H-bond network | `model_preparation.py` | ⬜ M5 |
-| 11 | Binuclear Zn site and MD parameterisation metadata | `metal_sites.py` | ⬜ M5 |
-| 12 | Ligand preparation and parameter provenance | `model_preparation.py` | ⬜ M5 |
-| 13 | Glycosylation (composition, strategies) | `glycans.py` | 🟠 site detection done; M5 for the rest |
-| 15 | Membrane and construct context | `membrane.py` (membrane part), `model_preparation.py` (M5) | 🟠 membrane part ✅ offline: UniProt/DeepTMHMM topology, C2-constrained placement, membrane QC, construct context, membrane-ready CHARMM-GUI/packmol-memgen inputs + readiness (never READY); 🟡 real data in Colab; construct repairs ⬜ M5 |
+| 9 | Structure-repair assessment and rebuilding: hybrid (template + AlphaFold2 anchor/gaps/side chains/reverted substitutions), junction geometry, clashes, per-atom provenance | `model_preparation.py` | ✅ offline; 🟡 Colab (9S7U) |
+| 10 | Protonation (PROPKA pH 7.4), Zn-ligand His tautomers, His H-bond tautomers, disulfides, alternative microstates | `model_preparation.py` | ✅ offline (PROPKA parser tested; PROPKA itself in Colab); 🟡 Colab |
+| 11 | Binuclear Zn site from experiment: coordination, Zn–Zn, bridging water; MD-treatment options (user choice, critical readiness item) | `metal_sites.py` | ✅ offline; 🟡 Colab; treatment choice pending (user) |
+| 12 | Ligands: apo system (template ligands and additives removed and listed); parameters for any kept ligand in M6 | `model_preparation.py` | ✅ |
+| 13 | Glycosylation: sequon observations, core GlcNAc where observed (template / transplanted, clash-checked), LINK records | `glycans.py`, `model_preparation.py` | ✅ offline; 🟡 Colab; full glycoforms not modelled (decision) |
+| 15 | Membrane and construct context | `membrane.py` (membrane part), `model_preparation.py` (M5) | 🟠 membrane part ✅ offline: UniProt/DeepTMHMM topology, C2-constrained placement, membrane QC, construct context, membrane-ready CHARMM-GUI/packmol-memgen inputs + readiness (never READY); 🟡 real data in Colab; construct repairs ✅ M5 (`model_preparation.py`) |
 | 16 | MD-readiness validator | `md_readiness.py` | ⬜ M6 |
 | 17 | MD system setup (engine-agnostic, OpenMM) | `md_readiness.py`, `config/md_protocol.yaml` | ⬜ M6 |
 | 18 | Trajectory analysis | `trajectory_analysis.py` | ⬜ M7 |

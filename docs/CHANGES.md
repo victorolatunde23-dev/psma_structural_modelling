@@ -192,3 +192,29 @@ The full design is in `docs/M4_ALPHAFOLD_MEMBRANE.md`.
 
 - **Construct context (bug).** Coverage used the SIFTS construct range, which includes expressed but unresolved residues, so full-length constructs counted as an "experimentally observed" membrane anchor. ConstructContext now reports both *construct* coverage (`Covers …`) and *modelled* coverage (`Modelled …` = construct minus missing residues), and the note is based on the modelled residues.
 - **Membrane rankings.** Rank-based scoring let a dimer with a poorly predicted TM helix (pLDDT 26.5, 68° tilt) tie with good ones. `membrane_anchor` and `membrane_dimer` now exclude models with TM pLDDT ≤ 50 and use TM helix tilt as a criterion.
+
+
+## Milestone 5 — model preparation (v0.5.0)
+
+**New output:** `outputs/<ACC>_model_preparation.xlsx` (notebook 04 or `scripts/run_preparation.py`), plus
+`preparation_tables/` and `model_preparation/<name>/`. The folder holds the oriented and template-frame PDBs, the protonation microstates, the membrane planes, `provenance.json` and a README. The sheets are:
+- PrepSummary, HybridSegments, ResidueSources, Junctions, Repairs, TemplateHetero
+- Glycans, SequonObservations, ZnSite, ZnContacts, MetalTreatmentOptions
+- Protonation, Microstates, Clashes, HybridMembrane, PrepReadiness, PrepChecks
+- PrepIssues, Software, Reproducibility, DataDictionary
+
+The full design is in `docs/M5_MODEL_PREPARATION.md`.
+
+**User decisions:**
+- the starting model is a hybrid of the 9S7U ectodomain dimer and the AlphaFold2 membrane anchor;
+- the Zn treatment is decided later;
+- glycans are modelled as the core GlcNAc where observed;
+- protonation is assigned at pH 7.4.
+
+**Design decisions:**
+- **Experimental first.** Every residue, ion and water that 9S7U resolves is used as is. AlphaFold2 fills only the membrane anchor (in the global dimer frame), the gaps (fitted on their flanks), missing side-chain atoms and reverted substitutions. Each atom records its source.
+- **The N-terminal graft point is searched** to minimise the peptide C–N distance. Junctions and clashes are reported, not fixed: minimisation belongs to Milestone 6.
+- **Zn ions are experimental.** Their coordination is checked, and the MD treatment is tabulated but never chosen by the pipeline.
+- **Only the core GlcNAc is modelled.** Crystallographic glycans are fragments. Transplants are clash-checked, and a rejected transplant falls through to the next donor.
+- **Protonation is written as residue names**, with heavy atoms only. Zn-ligand residues are fixed. Alternatives cover residues within 1 pH unit of their pKa plus the catalytic E424, one residue per microstate.
+- **Originals are hashed before and after the run** (critical), and every output appears in the provenance.

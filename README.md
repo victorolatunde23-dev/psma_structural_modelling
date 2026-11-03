@@ -10,7 +10,7 @@ so the core workflow can be reused for another UniProt accession.
 
 ## Status
 
-**Milestones 1–4 of 7 are complete**, plus the membrane part of checklist item 15 (Colab run of Milestone 4 pending). Milestone 1: the original survey notebook has been
+**Milestones 1–5 of 7 are complete** (Milestone 4 run in Colab; Milestone 5 Colab run pending). Milestone 1: the original survey notebook has been
 refactored into an importable package, with configuration, tests, sanity
 checks and a reproducibility manifest. See [`docs/CHECKLIST.md`](docs/CHECKLIST.md)
 for every component and [`docs/PLAN.md`](docs/PLAN.md) for the full plan.
@@ -20,7 +20,7 @@ for every component and [`docs/PLAN.md`](docs/PLAN.md) for the full plan.
 | `01_structure_survey.ipynb` | PDB survey, cross-check, assemblies, ligands, validation, lid states, template ranking | **M1 ✔** |
 | `02_interface_pocket_validation.ipynb` | part 1: dimer interfaces, crystal contacts, local map-model fit, ranking modes (**M2 ✔**); part 2: pocket fingerprints, ligand clustering, ligand-conditioned ranking, conserved waters, variants (**M3 ✔**) | M2–M3 |
 | `03_alphafold_comparison.ipynb` | AlphaFold DB model + AlphaFold2-multimer dimer **run in Colab** (ColabFold); confidence, comparison with experiment, confident-dimer rule, AF rankings; membrane topology, placement and QC; membrane-ready MD inputs ([design](docs/M4_ALPHAFOLD_MEMBRANE.md)) | **M4 ✔** (Colab run pending) |
-| `04_model_preparation.ipynb` | repairs, protonation, Zn site, ligands, glycans, construct context | M5 |
+| `04_model_preparation.ipynb` | hybrid model (9S7U ectodomain dimer + AlphaFold2 membrane anchor), repairs, Zn site + treatment options, core GlcNAc, PROPKA protonation + microstates, membrane-oriented model, provenance ([design](docs/M5_MODEL_PREPARATION.md)) | **M5 ✔** (Colab run pending) |
 | `05_md_system_setup.ipynb` | force fields, parameter provenance, solvation, MD readiness | M6 |
 | `06_md_trajectory_analysis.ipynb` | stability, interfaces, Zn geometry, lid dynamics, convergence | M7 |
 
@@ -60,10 +60,11 @@ src/psma_pipeline/
   structure_atoms.py   sasa.py   interfaces.py   local_fit.py   assessment.py   (M2)
   fingerprints.py   ligand_chem.py   waters.py   variants.py   pocket_analysis.py   (M3)
   alphafold.py   colabfold_run.py   membrane.py   (M4 + membrane context)
+  model_preparation.py   metal_sites.py   (M5)
 notebooks/    one notebook per stage (explanation + plots; no calculations)
-scripts/      run_survey.py, run_assessment.py, run_pockets.py, run_alphafold.py (command-line equivalents of notebooks 01–03)
+scripts/      run_survey.py, run_assessment.py, run_pockets.py, run_alphafold.py, run_preparation.py (command-line equivalents of notebooks 01–04)
 tests/        pytest suite (offline; gemmi tests skip without gemmi; network tests opt-in)
-docs/         PLAN.md, CHECKLIST.md, CHANGES.md, M4_ALPHAFOLD_MEMBRANE.md
+docs/         PLAN.md, CHECKLIST.md, CHANGES.md, M4_ALPHAFOLD_MEMBRANE.md, M5_MODEL_PREPARATION.md
 data/ cache/ outputs/   (contents not tracked)
 ```
 
@@ -73,7 +74,9 @@ data/ cache/ outputs/   (contents not tracked)
 - **UniProt numbering only through SIFTS** for experimental structures. Author, label_seq and UniProt numbering are kept in separately labelled columns. Predicted models have no SIFTS mapping, so they are numbered by sequence alignment to UniProt, and the critical `numbering_identity` check enforces it.
 - **PAE is indexed by residue key, never by position.** The matrix size and chain blocks must match the model, enforced by the critical `pae_indexing` check.
 - **A confident dimer must also be the experimental dimer.** ipTM and interface PAE are not enough: the confident-dimer rule also requires agreement with the canonical interface.
-- **Membrane-ready is not MD-ready.** The MD readiness table is never READY before Milestones 5–6.
+- **Membrane-ready is not MD-ready.** The readiness tables are never READY before Milestone 6.
+- **Originals are never modified.** Milestone 5 hashes every input before and after the run (critical check) and records each step in `provenance.json`.
+- **The Zn treatment is the user's choice.** `preparation.zn_md_treatment` must be set before MD; the pipeline only tabulates the options.
 - **Configured residues are checked.** Every configured residue is validated against the canonical sequence. Mismatches are dropped and reported.
 - **A missing lid is not an open lid.** A poorly modelled lid is reported as *disordered*, never as open.
 - **The B-factor ratio is an indirect indicator.** It is not used as a measure of map-model fit.

@@ -29,6 +29,7 @@ outputs:
   assessment_workbook: "{accession}_modelling_assessment.xlsx"
   pocket_workbook: "{accession}_pockets_waters_variants.xlsx"
   alphafold_workbook: "{accession}_alphafold_membrane.xlsx"   # Milestone 4 + membrane context
+  preparation_workbook: "{accession}_model_preparation.xlsx"  # Milestone 5
   write_csv: true
   write_parquet: true               # skipped with a warning if pyarrow is missing
   manifest: "{accession}_manifest.json"
@@ -415,3 +416,31 @@ membrane:                       # membrane and construct context (checklist item
     water_margin_A: 17.5        # solvent above/below the protein
     lateral_margin_A: 15.0      # lipid margin around the protein
     force_field_note: "CHARMM36m / Lipid21 - choose in Milestone 6"
+
+preparation:                    # Milestone 5: model preparation (notebook 04, model_preparation.py)
+  template: 9S7U                # experimental ectodomain dimer used as the base (closed entrance lid; user choice)
+  anchor_job: dimer             # Milestone 4 ColabFold job (cache/alphafold/colabfold/<job>) supplying the membrane anchor
+  anchor_model: CF:dimer:rank_001   # AlphaFold2 model: cytoplasmic tail, TM helix, stalk, gaps and missing side chains
+  name: hybrid_9S7U_AF2         # output folder name under outputs/model_preparation/
+  fit_plddt_min: 70             # AlphaFold2 residues used for the global dimer superposition
+  local_flank: 4                # residues on each side for the local fit of a gap segment
+  junction_search: 12           # N-terminal graft point is searched over this many experimental residues
+  junction_max_cn: 2.0          # Å; peptide C–N at a graft point above this = WARNING
+  clash_heavy_min: 2.2          # Å; non-bonded heavy-atom pairs closer than this = clash (WARNING)
+  keep_ions: [ZN, CA, CL]       # ions kept from the template
+  keep_waters: zn_shell         # zn_shell (waters within water_zn_max of a Zn) | none | all
+  water_zn_max: 3.0             # Å
+  remove_ligands: true          # apo system: ligands / additives are removed and listed
+  glycans:
+    strategy: core_glcnac       # core_glcnac (first GlcNAc where observed experimentally) | none
+    min_observed_structures: 1  # glycosylate a sequon only if observed in at least this many PDB entries
+    donors_max: 10              # entries tried (TemplateRanking order) to transplant a missing core GlcNAc
+    clash_min: 2.0              # Å; transplanted sugar heavy atom – protein heavy atom
+    link_max: 2.0               # Å; sugar C1 – Asn ND2
+  protonation:
+    ph: 7.4
+    window: 1.0                 # |pKa − pH| ≤ window → alternative microstate written
+    always_alternative: [E424]  # catalytic acid/base: both states written regardless of PROPKA
+    max_microstates: 12
+    hbond_max: 3.2              # Å; His tautomer from H-bond acceptors near ND1 / NE2
+  zn_md_treatment: null         # REQUIRED before MD (Milestone 6): nonbonded_12_6_4 | bonded_mcpb | cationic_dummy
