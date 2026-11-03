@@ -187,3 +187,8 @@ The full design is in `docs/M4_ALPHAFOLD_MEMBRANE.md`.
 **Bugs found during development:**
 - **`tmfold` alignment.** A semi-global alignment cannot skip *both* an expression tag and the unmodelled start of UniProt, so a tag on a mid-sequence construct was forced onto the preceding residues as mismatches. `align_to_uniprot` and `tmfold` now use a local alignment, with regression tests in both repositories.
 - **`tmfold` membrane thickness.** The loop penalty was a fraction of *all* loop residues, so PSMA's ~700-residue ectodomain diluted it. Ties between offsets also resolved to the first offset rather than the thinnest slab, so the fitted slab grew to its 40 Å limit. The penalty is now per residue relative to the TM count, and ties go to the thinnest slab (36 Å for a 24-residue helix). Regression tests were added in both repositories.
+
+### Milestone 4 — fixes after the first Colab run (AlphaFold DB + 3 AlphaFold2-multimer dimer models)
+
+- **Construct context (bug).** Coverage used the SIFTS construct range, which includes expressed but unresolved residues, so full-length constructs counted as an "experimentally observed" membrane anchor. ConstructContext now reports both *construct* coverage (`Covers …`) and *modelled* coverage (`Modelled …` = construct minus missing residues), and the note is based on the modelled residues.
+- **Membrane rankings.** Rank-based scoring let a dimer with a poorly predicted TM helix (pLDDT 26.5, 68° tilt) tie with good ones. `membrane_anchor` and `membrane_dimer` now exclude models with TM pLDDT ≤ 50 and use TM helix tilt as a criterion.

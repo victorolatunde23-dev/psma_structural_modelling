@@ -375,9 +375,10 @@ alphafold:                      # Milestone 4: AlphaFold DB + AlphaFold2 run in 
       membrane_anchor:
         description: Membrane-anchored starting model (confident TM helix, consistent placement)
         include: {}
-        exclude: {"Orientation reliability": "unsupported"}
+        exclude: {"Orientation reliability": "unsupported", "Mean pLDDT TM": {max: 50}}   # TM helix pLDDT <= 50: not a usable anchor
         criteria:
           - {column: "Mean pLDDT TM",                  direction: higher, weight: 2}
+          - {column: "TM helix tilt (°)",              direction: lower,  weight: 1}
           - {column: "TM in slab",                     direction: higher, weight: 1}
           - {column: "TM-ectodomain PAE (Å)",          direction: lower,  weight: 1}
           - {column: "Ectodomain atoms in slab",       direction: lower,  weight: 1}
@@ -386,9 +387,10 @@ alphafold:                      # Milestone 4: AlphaFold DB + AlphaFold2 run in 
       membrane_dimer:
         description: Membrane-anchored dimer for MD (membrane_anchor + symmetry consistency)
         include: {"Model kind": "multimer"}
-        exclude: {"Orientation reliability": "unsupported"}
+        exclude: {"Orientation reliability": "unsupported", "Mean pLDDT TM": {max: 50}}
         criteria:
           - {column: "Mean pLDDT TM",                  direction: higher, weight: 2}
+          - {column: "TM helix tilt (°)",              direction: lower,  weight: 1}
           - {column: "C2 axis to membrane normal (°)", direction: lower,  weight: 2}
           - {column: "TM in slab",                     direction: higher, weight: 1}
           - {column: "Ectodomain atoms in slab",       direction: lower,  weight: 1}

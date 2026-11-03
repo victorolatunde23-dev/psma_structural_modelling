@@ -197,6 +197,33 @@ def test_membrane_placement(acfg, tmp_path, dimer):
         assert row["C2 axis to membrane normal (°)"] < 3 and abs(row["C2 rotation angle (°)"] - 180) < 1
 
 
+def test_construct_context_uses_modelled_residues(acfg):
+    """A full-length construct whose TM helix is not resolved must not count as an experimental anchor."""
+    from psma_pipeline.membrane import construct_context, topology_table
+    topo, _ = topology_table(acfg, A.uniprot_entry_with_topology(), F.USEQ, IssueLog())
+    chains = pd.DataFrame({"PDB ID": ["FULL", "ECTO"], "Chain (auth)": ["A", "A"],
+                           "UniProt range (SIFTS)": ["1-750", "44-750"], "Observed residues": [694, 694],
+                           "Missing residues (UniProt numbering)": ["1-56", "44-56"]})
+    ctx = construct_context(chains, topo, 750).set_index("PDB ID")
+    assert ctx.loc["FULL", "Covers transmembrane"] == 1.0 and ctx.loc["FULL", "Modelled transmembrane"] == 0.0
+    assert "expressed in 1 chain(s) (FULL) but not modelled" in ctx.loc["(all)", "Note"]
+    chains.loc[0, "Missing residues (UniProt numbering)"] = "1-19, 44-56"       # TM helix resolved
+    ctx = construct_context(chains, topo, 750).set_index("PDB ID")
+    assert ctx.loc["FULL", "Modelled transmembrane"] == 1.0 and ctx.loc["(all)", "Note"].startswith("TM helix modelled")
+
+
+def test_membrane_rankings_exclude_poor_tm_helix(acfg):
+    from psma_pipeline.alphafold import rank_models
+    summ = pd.DataFrame({"Model ID": ["good", "badTM"], "Model kind": ["multimer"] * 2,
+                         "Orientation reliability": ["weak"] * 2, "Mean pLDDT TM": [55.0, 26.5],
+                         "TM helix tilt (°)": [19.0, 68.0], "TM in slab": [1.0, 1.0],
+                         "C2 axis to membrane normal (°)": [3.8, 2.5], "Ectodomain atoms in slab": [0, 0],
+                         "ipTM": [0.89, 0.89], "TM-ectodomain PAE (Å)": [29.0, 30.0], "Mean pLDDT ectodomain": [95.7, 96.0]})
+    r, top = rank_models(summ, acfg, IssueLog())
+    for mode in ("membrane_dimer", "membrane_anchor"):
+        assert r[r["Ranking mode"] == mode]["Model ID"].tolist() == ["good"], mode
+
+
 def test_md_model_selection_requires_confident_dimer():
     from types import SimpleNamespace
 

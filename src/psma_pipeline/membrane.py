@@ -351,32 +351,63 @@ def placement_metrics(m: Any, pl: Placement, cfg: Any, useq: str, regions: dict[
 # Construct context
 # ---------------------------------------------------------------------------
 def construct_context(chains: pd.DataFrame, topo: pd.DataFrame, length: int) -> pd.DataFrame:
-    """Experimental constructs against the membrane topology."""
+    """Experimental chains against the membrane topology: what was expressed and what is modelled.
+
+    *Construct* coverage uses the SIFTS-mapped sequence (``UniProt range (SIFTS)``), which includes
+    residues that were expressed but not resolved. *Modelled* coverage subtracts the survey's
+    ``Missing residues (UniProt numbering)``, so a full-length construct whose TM helix is not
+    seen in the density does not count as an experimental membrane anchor.
+    """
     from .conformations import construct_ranges
+    from .numbering import parse_ranges
 
     labels = "".join(topo["Membrane label"]) if len(topo) else "-" * length
     parts = {"cytoplasmic": {i + 1 for i, c in enumerate(labels) if c == "I"},
              "transmembrane": {i + 1 for i, c in enumerate(labels) if c in MEMBRANE},
              "extracellular": {i + 1 for i, c in enumerate(labels) if c == "O"}}
+    missing: dict[tuple[str, str], set[int]] = {}
+    known: set[tuple[str, str]] = set()
+    if len(chains) and "Missing residues (UniProt numbering)" in chains:
+        for _, r in chains.iterrows():
+            key = (r["PDB ID"], r["Chain (auth)"])
+            txt = r.get("Missing residues (UniProt numbering)")
+            if pd.notna(r.get("Observed residues")):
+                known.add(key)
+            try:
+                missing[key] = set(parse_ranges(txt)) if pd.notna(txt) and str(txt).strip() else set()
+            except ValueError:
+                missing[key] = set()
     rows = []
     for (pdb, ch), (a, b) in construct_ranges(chains).items():
         span = set(range(a, b + 1))
+        modelled = span - missing.get((pdb, ch), set())
         r = {"PDB ID": pdb, "Chain": ch, "UniProt range (SIFTS)": f"{a}-{b}",
-             "Fraction of full length": round(len(span) / length, 3)}
+             "Fraction of full length": round(len(span) / length, 3),
+             "Modelled residues": len(modelled) if (pdb, ch) in known else None}
         for name, s in parts.items():
             r[f"Covers {name}"] = round(len(span & s) / len(s), 3) if s else None
+            r[f"Modelled {name}"] = (round(len(modelled & s) / len(s), 3) if s else None) if (pdb, ch) in known else None
         rows.append(r)
     df = pd.DataFrame(rows)
     if len(df):
-        tm_any = bool((df["Covers transmembrane"].fillna(0) > 0).any())
-        cyto_any = bool((df["Covers cytoplasmic"].fillna(0) > 0).any())
-        note = {"PDB ID": "(all)", "Chain": "",
-                "UniProt range (SIFTS)": f"{len(df)} chains",
+        tm_built = df[df["Modelled transmembrane"].fillna(0) > 0]
+        tm_expressed = df[df["Covers transmembrane"].fillna(0) > 0]
+        note = {"PDB ID": "(all)", "Chain": "", "UniProt range (SIFTS)": f"{len(df) } chains",
                 "Fraction of full length": round(df["Fraction of full length"].max(), 3),
-                "Covers cytoplasmic": float(cyto_any), "Covers transmembrane": float(tm_any),
-                "Covers extracellular": round(df["Covers extracellular"].max(), 3)}
-        note["Note"] = ("membrane anchor observed experimentally" if tm_any else
-                        "no experimental structure contains the TM helix: the membrane anchor is prediction-only")
+                "Modelled residues": df["Modelled residues"].max()}
+        for name in parts:
+            note[f"Covers {name}"] = round(df[f"Covers {name}"].max(), 3)
+            note[f"Modelled {name}"] = round(df[f"Modelled {name}"].max(), 3) if df[f"Modelled {name}"].notna().any() else None
+        if len(tm_built):
+            ids = ", ".join(sorted(set(tm_built["PDB ID"]))[:10])
+            note["Note"] = (f"TM helix modelled in {len(tm_built)} chain(s) ({ids}); best coverage "
+                            f"{tm_built['Modelled transmembrane'].max():.0%}")
+        elif len(tm_expressed):
+            ids = ", ".join(sorted(set(tm_expressed["PDB ID"]))[:10])
+            note["Note"] = (f"the TM helix is expressed in {len(tm_expressed)} chain(s) ({ids}) but not modelled in any: "
+                            "the membrane anchor is prediction-only")
+        else:
+            note["Note"] = "no experimental construct contains the TM helix: the membrane anchor is prediction-only"
         df = pd.concat([df, pd.DataFrame([note])], ignore_index=True)
     return df
 
@@ -570,7 +601,7 @@ def run_membrane(cfg: Any, res: Any, survey: dict[str, pd.DataFrame], entry: dic
             depth.append(round(pl.membrane.z.get(pl.offsets[c] + int(u), np.nan), 2))
         rc["Membrane depth (Å)"] = depth
         rc["Membrane label"] = rc["UniProt number"].map(lambda u: labels[int(u) - 1] if 0 < int(u) <= len(labels) else None)
-    cols = ["Model ID", "TM in slab", "TM-ectodomain PAE (Å)", "Ectodomain atoms in slab",
+    cols = ["Model ID", "TM in slab", "TM helix tilt (°)", "TM-ectodomain PAE (Å)", "Ectodomain atoms in slab",
             "C2 axis to membrane normal (°)", "Orientation reliability"]
     mcols = place[[c for c in cols if c in place]] if len(place) else pd.DataFrame(columns=["Model ID"])
     tables = {"MembranePlacement": place,
