@@ -390,8 +390,9 @@ def construct_context(chains: pd.DataFrame, topo: pd.DataFrame, length: int) -> 
         rows.append(r)
     df = pd.DataFrame(rows)
     if len(df):
-        tm_built = df[df["Modelled transmembrane"].fillna(0) > 0]
-        tm_expressed = df[df["Covers transmembrane"].fillna(0) > 0]
+        num = lambda c: pd.to_numeric(df[c], errors="coerce").fillna(0)  # noqa: E731 - columns may hold blanks
+        tm_built = df[num("Modelled transmembrane") > 0]
+        tm_expressed = df[num("Covers transmembrane") > 0]
         note = {"PDB ID": "(all)", "Chain": "", "UniProt range (SIFTS)": f"{len(df) } chains",
                 "Fraction of full length": round(df["Fraction of full length"].max(), 3),
                 "Modelled residues": df["Modelled residues"].max()}
