@@ -1072,9 +1072,21 @@ def readiness(t: dict, cfg: Any, t_status: Status, t_detail: str, propka_ok: boo
     add("zinc ions placed (experimental)", zst, f"{n_zn} of {exp}; geometry: " + (", ".join(f"{r.Zn} {r.Status}" for r in zn.itertuples()) if n_zn else "none"))
     add("zinc MD treatment", t_status, t_detail)
     br = int(zn["Bridging water/hydroxide"].clip(upper=1).sum()) if len(zn) and "Bridging water/hydroxide" in zn else 0
-    add("bridging water / hydroxide", Status.WARNING,
-        ("present in the template; decide water vs hydroxide together with the Zn treatment" if br else
-         "not in the template; add one with the Zn treatment if the chosen model needs it"))
+    bridge = cfg.get("preparation.zn_bridge")
+    pt = t.get("Protonation", pd.DataFrame())
+    e424 = set(pt.loc[pt["UniProt number"] == 424, "State"]) if len(pt) else set()
+    if bridge not in ("water", "hydroxide"):
+        add("bridging water / hydroxide", Status.WARNING,
+            ("present in the template; set preparation.zn_bridge (water | hydroxide)" if br else
+             "not in the template; add one with the Zn treatment if the chosen model needs it"))
+    elif not br:
+        add("bridging water / hydroxide", Status.FAIL, f"{bridge} chosen, but no bridging water in the template")
+    elif bridge == "hydroxide" and e424 and e424 != {"GLH"}:
+        add("bridging water / hydroxide", Status.WARNING,
+            f"hydroxide chosen but Glu424 default state is {', '.join(sorted(e424))} (expected GLH): use the GLH microstate")
+    else:
+        add("bridging water / hydroxide", Status.PASS,
+            f"{bridge} chosen ({br} site(s)); Glu424 default state {', '.join(sorted(e424)) or 'n/a'}")
     het = t["TemplateHetero"]
     removed = het[het["Decision"] == "removed"] if len(het) else het
     add("ligands / additives", Status.PASS, "removed (apo): " + (", ".join(sorted(set(removed["Component"]))) if len(removed) else "none"))

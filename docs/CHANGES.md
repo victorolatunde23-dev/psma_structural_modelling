@@ -224,3 +224,30 @@ The full design is in `docs/M5_MODEL_PREPARATION.md`.
 - **Graft point (bug).** The N-terminal graft point minimised the peptide C–N distance, so it picked overlapping atoms (0.75 Å). That passed, because only bonds above 2.0 Å were flagged. The graft point is now the one closest to the ideal 1.33 Å, and a junction is a WARNING outside 1.1–2.0 Å (`junction_min_cn`, `junction_max_cn`).
 - **Zn geometry check.** For each ligand residue, only the closest donor atom is range-checked. The second oxygen of a monodentate Asp (D453 OD1, 2.76 Å) is still listed in ZnContacts, but no longer flagged.
 - **pandas warning.** `rank_models` builds the top table from records.
+
+
+## Milestone 6, part A — bonded Zn parameters (v0.6.0)
+
+**New output:** `outputs/<ACC>_md_setup.xlsx` (notebook 05 part A), `md_tables/` and `md_setup/zinc_mcpb/`. The sheets are:
+- AmberTools, SiteGeometry, QMSummary
+- FrcmodBond, FrcmodAngl, FrcmodNonb
+- SiteResidues, ZnBonds, TleapCheck, ZincChecks
+- ZincIssues, Software, Reproducibility, DataDictionary
+
+The full design is in `docs/M6_ZINC_PARAMETERS.md`.
+
+**User decisions:**
+- the Zn treatment is the bonded model from MCPB.py;
+- the bridging species is a hydroxide, with Glu424 protonated (GCPII QM/MM literature);
+- the QM runs in PySCF inside Colab.
+
+**Design decisions:**
+- **`qm_bridge` runs MCPB.py's own Gaussian inputs with PySCF**, using Gaussian's B3LYP (`b3lypg`) and an UltraFine grid. It writes the `.fchk`/`.log` fields MCPB.py reads, so MCPB.py still builds the models and fits the parameters.
+- **One site is parameterised (chain A) and reused for chain B.**
+- **Metal–ligand cut-off 2.5 Å**, from the 9S7U geometry.
+- **Frequency scale factor 0.9614.**
+- **ff14SB/TIP3P**, for Lipid21 compatibility in part B.
+- **The whole metal site must have an integer charge**, not each residue (RESP spreads charge).
+- **A water self-test** (frequencies against the literature, plus pymsmt read-back) gates the metal-site QM.
+
+**Changed in Milestone 5:** `preparation.zn_md_treatment` is now `bonded_mcpb` and the new `preparation.zn_bridge` is `hydroxide`. The readiness item "bridging water / hydroxide" passes when a species is chosen and Glu424's default state is consistent with it.

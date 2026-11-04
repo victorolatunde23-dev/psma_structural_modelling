@@ -597,6 +597,28 @@ _DICT: list[tuple[str, str, str, str, str]] = [
     ("PrepSummary", r"Item|Value", "Run summary: template, anchor, fit, counts, protonation, Zn treatment, output folder", "", ""),
     ("PrepReadiness", r"Item", "Blocker between the prepared model and an MD-ready system", "", ""),
     ("PrepReadiness", r"Detail", "Finding and the milestone that resolves it", "", ""),
+    # ---- Milestone 6 part A: Zn parameters (MCPB.py + PySCF) ---------------------------------------
+    ("AmberTools", r"Tool|Path|Available", "AmberTools executable found on PATH", "", ""),
+    ("SiteGeometry|QMSummary|TleapCheck", r"Item|Value", "Site geometry / QM summary / tleap build summary", "", ""),
+    ("QMSummary", r"Model", "MCPB.py model (small: Seminario force constants; large: RESP charges)", "", ""),
+    ("FrcmodBond", r"Bond", "Atom types of a metal-site bond (MCPB.py new types M*, Y*)", "", ""),
+    ("FrcmodBond", r"k \(kcal/mol/Å²\)", "Seminario bond force constant", "kcal/mol/Å²", ""),
+    ("FrcmodBond", r"r0 \(Å\)", "Equilibrium bond length (QM-optimised small model)", "Å", ""),
+    ("FrcmodAngl", r"Angle", "Atom types of a metal-site angle", "", ""),
+    ("FrcmodAngl", r"k \(kcal/mol/rad²\)", "Seminario angle force constant", "kcal/mol/rad²", ""),
+    ("FrcmodAngl", r"θ0 \(°\)", "Equilibrium angle", "°", ""),
+    ("FrcmodBond|FrcmodAngl", r"Comment", "frcmod comment (method)", "", ""),
+    ("FrcmodNonb", r"Type|R\* \(Å\)|ε \(kcal/mol\)", "Lennard-Jones parameters of the new metal types", "", ""),
+    ("SiteResidues", r"Residue", "MCPB.py renamed metal-site residue (mol2 template)", "", ""),
+    ("SiteResidues", r"Atoms", "Atoms in the residue template", "count", ""),
+    ("SiteResidues", r"Net charge", "Sum of RESP charges of the residue (the whole site sums to an integer)", "e", ""),
+    ("SiteResidues", r"Metal-site atoms \(type, RESP charge\)", "Zn and ligating atoms with their new types and charges", "e", ""),
+    ("ZnBonds", r"Atom \d", "Bonded atoms (residue as renamed by MCPB.py, number, atom)", "", "UniProt"),
+    ("ZnBonds", r"Types", "Atom types of the bond", "", ""),
+    ("ZnBonds", r"Model distance \(Å\)", "Distance in the prepared model (experimental Zn site)", "Å", ""),
+    ("ZnBonds", r"MCPB r0 \(Å\)", "Equilibrium length from the QM-optimised small model", "Å", ""),
+    ("ZnBonds", r"MCPB k \(kcal/mol/Å²\)", "Seminario force constant", "kcal/mol/Å²", ""),
+    ("ZnBonds", r"r0 − model \(Å\)", "QM equilibrium minus experimental distance", "Å", ""),
     # ---- run-level sheets ------------------------------------------------------------------------
     ("RunIssues", r"Stage", "Pipeline stage that recorded the issue", "", ""),
     ("RunIssues", r"Message", "Issue description", "", ""),
@@ -617,7 +639,7 @@ _DICT: list[tuple[str, str, str, str, str]] = [
 _COMPILED = [(re.compile(f"^(?:{s})$"), re.compile(f"^(?:{c})$"), d, u, n) for s, c, d, u, n in _DICT]
 
 
-SHEET_ALIASES = {"HybridMembrane": ["MembranePlacement"], "PrepChecks": ["SanityChecks"], "PrepIssues": ["RunIssues"],
+SHEET_ALIASES = {"ZincChecks": ["SanityChecks"], "ZincIssues": ["RunIssues"], "HybridMembrane": ["MembranePlacement"], "PrepChecks": ["SanityChecks"], "PrepIssues": ["RunIssues"],
                  "VariantAlphaFold": ["VariantStructureMapping"], "AFInterfaces": ["Interfaces"], "AFInterfaceContacts": ["InterfaceContacts"],
                  "AFEntranceLid": ["EntranceLid"], "AFRankings": ["TemplateRankings", "TemplateRanking"],
                  "AFRankingTop": ["RankingTop", "TemplateRanking"], "AlphaFoldIssues": ["RunIssues"],

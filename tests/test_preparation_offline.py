@@ -120,9 +120,20 @@ def test_zn_site(result, pcfg):
     assert (zn["Status"] == "PASS").all()
     assert zn["Zn–Zn distance (Å)"].round(1).eq(3.3).all() and (zn["Bridging water/hydroxide"] >= 1).all()
     opt = result.tables["MetalTreatmentOptions"]
-    assert not opt["Chosen"].any()
+    assert opt.set_index("Treatment")["Chosen"].to_dict() == {"nonbonded_12_6_4": False, "bonded_mcpb": True,
+                                                              "cationic_dummy": False}
     r = result.tables["PrepReadiness"].set_index("Item")
-    assert r.loc["zinc MD treatment", "Status"] == "FAIL" and r.loc["zinc ions placed (experimental)", "Status"] == "PASS"
+    assert r.loc["zinc MD treatment", "Status"] == "PASS" and r.loc["zinc ions placed (experimental)", "Status"] == "PASS"
+    assert r.loc["bridging water / hydroxide", "Status"] in ("PASS", "WARNING")   # hydroxide chosen in the config
+
+
+def test_zn_treatment_unchosen_blocks(pcfg, inputs):
+    cfg2 = pcfg.with_overrides({"preparation": {"zn_md_treatment": None, "zn_bridge": None}})
+    res = MP.run_preparation(cfg2, P.survey_tables(), None, sess=object(), template_asm=inputs["asm"],
+                             anchor=inputs["anchor"], donors=inputs["donors"], uniprot=P.uniprot_entry(), run_pka=False)
+    r = res.tables["PrepReadiness"].set_index("Item")
+    assert r.loc["zinc MD treatment", "Status"] == "FAIL" and r.loc["bridging water / hydroxide", "Status"] == "WARNING"
+    assert not res.tables["MetalTreatmentOptions"]["Chosen"].any()
 
 
 def test_zn_treatment_choice_unblocks_item(pcfg, inputs):
