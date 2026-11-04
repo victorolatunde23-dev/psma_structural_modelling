@@ -391,8 +391,9 @@ def rank_for_ligand(res: PocketResults, cfg: Config, comp: str | None = None, sm
                      if ref_fp else None})
     per = pd.DataFrame(rows)
     if len(per):
-        key = per["Pocket-contact similarity"].fillna(per["Required sub-pockets occupied"]).fillna(-1)
-        per = (per.assign(_k=key, _c=per["Ligand chemical similarity"].fillna(-1))
+        num = lambda c: pd.to_numeric(per[c], errors="coerce")  # noqa: E731 - object columns may hold None
+        key = num("Pocket-contact similarity").fillna(num("Required sub-pockets occupied")).fillna(-1)
+        per = (per.assign(_k=key, _c=num("Ligand chemical similarity").fillna(-1))
                .sort_values(["PDB ID", "_k", "_c", "Best instance"], ascending=[True, False, False, True])
                .drop_duplicates("PDB ID").drop(columns=["_k", "_c"]).set_index("PDB ID"))
     crit = res.criteria.copy()

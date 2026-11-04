@@ -38,8 +38,17 @@ def result(pcfg, inputs):
 
 
 def test_global_fit_recovers_frame(pcfg, inputs):
+    """The synthetic dimer is exactly C2-symmetric, so both chain pairings fit equally well (a tie);
+    the direct pairing must win regardless of floating-point rounding."""
     fit = MP.global_dimer_fit(inputs["asm"], inputs["anchor"], pcfg)
     assert fit["rmsd"] < 0.3 and fit["pairs"] == {"A|1": "A", "B|1": "B"}
+    # swapped chains in the AF2 model: the direct pairing (template A -> AF2 'A' label) is now the swapped one
+    swapped = inputs["anchor"]
+    m = MP.AFModel(swapped.model_id, swapped.source, swapped.kind,
+                   swapped.atoms.assign(chain=swapped.atoms["chain"].map({"A": "B", "B": "A"})),
+                   chain_info=[{**c, "Chain": {"A": "B", "B": "A"}[c["Chain"]]} for c in swapped.chain_info])
+    fit2 = MP.global_dimer_fit(inputs["asm"], m, pcfg)
+    assert fit2["rmsd"] < 0.3 and list(fit2["pairs"].values()) == m.target_chains[:2]
 
 
 def test_hybrid_residue_sources(result):

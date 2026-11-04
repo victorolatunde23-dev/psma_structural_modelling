@@ -172,7 +172,9 @@ def global_dimer_fit(asm: pd.DataFrame, af: AFModel, cfg: Any) -> dict:
             Q.append(np.array([exp[p][u] for u in core]))
             n += len(core)
         R, pm, qm, rmsd = _fit(P, Q)
-        if best is None or rmsd < best["rmsd"]:
+        # A symmetric homodimer fits equally well with chains swapped; keep the direct pairing (template
+        # chain names) unless the swapped one is clearly better, so the choice never depends on rounding.
+        if best is None or rmsd < best["rmsd"] - 0.05:
             best = {"R": R, "pm": pm, "qm": qm, "rmsd": rmsd, "pairs": dict(zip(prots, order)), "n": n}
     return best
 
@@ -285,7 +287,8 @@ def build_hybrid(asm: pd.DataFrame, af: AFModel, useq: str, cfg: Any, issues: Is
                 if Pb is not None and len(common) >= 3:
                     Rl, pml, qml, _ = _fit([Pb], [Qb])
                     add = _moved(F[u][F[u]["atom"].isin(missing)], Rl, pml, qml)
-                    r2 = pd.concat([r2, add], ignore_index=True)
+                    cols = ["resname", "atom", "element", "x", "y", "z", "b"]   # the columns used downstream
+                    r2 = pd.concat([r2[cols], add[cols]], ignore_index=True)
                     res[u] = (r2, f"experimental {template} + AF2 side-chain atoms")
                     rep_rows.append({"Chain": hc, "UniProt number": u, "Repair": "missing side-chain atoms from AF2",
                                      "Template residue": r["resname"].iloc[0], "UniProt residue": useq[u - 1],

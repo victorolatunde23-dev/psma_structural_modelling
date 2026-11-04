@@ -886,6 +886,8 @@ def rank_models(summary: pd.DataFrame, cfg: Any, issues: IssueLog, top_n: int = 
             t = r.head(top_n)[["Ranking mode", "Model ID", "Rank", "Score (0-1, higher = better)"]].copy()
             t["Models eligible"] = len(r)
             tops.append(t)
+    outs = [o.dropna(axis=1, how="all") for o in outs if len(o)]
+    tops = [t for t in tops if len(t)]
     return (pd.concat(outs, ignore_index=True) if outs else pd.DataFrame(),
             pd.concat(tops, ignore_index=True) if tops else pd.DataFrame())
 
