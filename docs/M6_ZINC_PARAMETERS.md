@@ -1,7 +1,7 @@
 # Milestone 6, part A: bonded parameters for the binuclear Zn site
 
 Code: `src/psma_pipeline/zinc_params.py`, `src/psma_pipeline/qm_bridge.py`.
-Notebook: `notebooks/05_md_system_setup.ipynb` (part A).
+Notebook: `notebooks/05_md_system_setup.ipynb` (part A). The stages run in a separate Python 3.11 environment (`psma_pipeline.md_env`, `scripts/run_md_setup.py`), because AmberTools has no build for Colab's Python 3.13.
 Outputs:
 - `outputs/<ACC>_md_setup.xlsx`
 - `outputs/md_tables/`

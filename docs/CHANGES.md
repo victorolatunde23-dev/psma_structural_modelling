@@ -274,3 +274,8 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 **New config:** `md.system` (lipids, ratio, salt, margins, clash cut-off, force fields) and `md.openmm` (cut-off, restraints, tolerances, smoke-run lengths, temperature).
 
 **Notebook 05:** part B sections F–J; setup installs packmol and OpenMM from conda-forge.
+
+### Milestone 6 — Colab install fix (v0.7.1)
+
+- **Bug (first Colab run):** `mamba install ambertools … openmm` failed. Colab's Python is now 3.13, which condacolab pins, and AmberTools has no conda build for it.
+- **Fix:** the MD tools no longer go into Colab's Python. Notebook 05 builds a **separate micromamba environment with Python 3.11** (`psma_pipeline.md_env`, ~5–10 min, no runtime restart). The QM self-test, zinc parameters and system build run there through `scripts/run_md_setup.py`; results come back as JSON tables for display. condacolab is no longer used.
