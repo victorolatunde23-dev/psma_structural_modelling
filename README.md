@@ -10,7 +10,7 @@ so the core workflow can be reused for another UniProt accession.
 
 ## Status
 
-**Milestones 1–5 of 7 are complete and run in Colab; Milestone 6 part A (bonded Zn parameters) is built** (Colab run pending). Milestone 1: the original survey notebook has been
+**Milestones 1–5 of 7 are complete and run in Colab; Milestone 6 (bonded Zn parameters; membrane system build and minimisation) is built** (Colab runs pending). Milestone 1: the original survey notebook has been
 refactored into an importable package, with configuration, tests, sanity
 checks and a reproducibility manifest. See [`docs/CHECKLIST.md`](docs/CHECKLIST.md)
 for every component and [`docs/PLAN.md`](docs/PLAN.md) for the full plan.
@@ -21,7 +21,7 @@ for every component and [`docs/PLAN.md`](docs/PLAN.md) for the full plan.
 | `02_interface_pocket_validation.ipynb` | part 1: dimer interfaces, crystal contacts, local map-model fit, ranking modes (**M2 ✔**); part 2: pocket fingerprints, ligand clustering, ligand-conditioned ranking, conserved waters, variants (**M3 ✔**) | M2–M3 |
 | `03_alphafold_comparison.ipynb` | AlphaFold DB model + AlphaFold2-multimer dimer **run in Colab** (ColabFold); confidence, comparison with experiment, confident-dimer rule, AF rankings; membrane topology, placement and QC; membrane-ready MD inputs ([design](docs/M4_ALPHAFOLD_MEMBRANE.md)) | **M4 ✔** (Colab run pending) |
 | `04_model_preparation.ipynb` | hybrid model (9S7U ectodomain dimer + AlphaFold2 membrane anchor), repairs, Zn site + treatment options, core GlcNAc, PROPKA protonation + microstates, membrane-oriented model, provenance ([design](docs/M5_MODEL_PREPARATION.md)) | **M5 ✔** (Colab run pending) |
-| `05_md_system_setup.ipynb` | part A: bonded Zn parameters with MCPB.py, QM in PySCF inside Colab ([design](docs/M6_ZINC_PARAMETERS.md)); part B: membrane system build, minimisation, MD readiness | **M6 part A ✔** (Colab run pending); part B ⬜ |
+| `05_md_system_setup.ipynb` | part A: bonded Zn parameters with MCPB.py, QM in PySCF inside Colab ([design](docs/M6_ZINC_PARAMETERS.md)); part B: membrane system build, minimisation, MD readiness | **M6 parts A and B ✔** (Colab runs pending) |
 | `06_md_trajectory_analysis.ipynb` | stability, interfaces, Zn geometry, lid dynamics, convergence | M7 |
 
 ## Quick start
@@ -61,11 +61,11 @@ src/psma_pipeline/
   fingerprints.py   ligand_chem.py   waters.py   variants.py   pocket_analysis.py   (M3)
   alphafold.py   colabfold_run.py   membrane.py   (M4 + membrane context)
   model_preparation.py   metal_sites.py   (M5)
-  zinc_params.py   qm_bridge.py   (M6 part A)
+  zinc_params.py   qm_bridge.py   system_build.py   (M6)
 notebooks/    one notebook per stage (explanation + plots; no calculations)
 scripts/      run_survey.py, run_assessment.py, run_pockets.py, run_alphafold.py, run_preparation.py (command-line equivalents of notebooks 01–04)
 tests/        pytest suite (offline; gemmi tests skip without gemmi; network tests opt-in)
-docs/         PLAN.md, CHECKLIST.md, CHANGES.md, M4_ALPHAFOLD_MEMBRANE.md, M5_MODEL_PREPARATION.md, M6_ZINC_PARAMETERS.md
+docs/         PLAN.md, CHECKLIST.md, CHANGES.md, M4_ALPHAFOLD_MEMBRANE.md, M5_MODEL_PREPARATION.md, M6_ZINC_PARAMETERS.md, M6_SYSTEM_BUILD.md
 data/ cache/ outputs/   (contents not tracked)
 ```
 
@@ -75,7 +75,7 @@ data/ cache/ outputs/   (contents not tracked)
 - **UniProt numbering only through SIFTS** for experimental structures. Author, label_seq and UniProt numbering are kept in separately labelled columns. Predicted models have no SIFTS mapping, so they are numbered by sequence alignment to UniProt, and the critical `numbering_identity` check enforces it.
 - **PAE is indexed by residue key, never by position.** The matrix size and chain blocks must match the model, enforced by the critical `pae_indexing` check.
 - **A confident dimer must also be the experimental dimer.** ipTM and interface PAE are not enough: the confident-dimer rule also requires agreement with the canonical interface.
-- **Membrane-ready is not MD-ready.** The readiness tables are never READY before Milestone 6.
+- **Membrane-ready is not MD-ready.** Only the Milestone 6 `MDReadiness` table can say READY, and only when nothing FAILs; assumptions (lipids, glycans) stay listed as WARNING.
 - **Originals are never modified.** Milestone 5 hashes every input before and after the run (critical check) and records each step in `provenance.json`.
 - **The Zn treatment is the user's choice.** `preparation.zn_md_treatment` must be set before MD; the pipeline only tabulates the options.
 - **Configured residues are checked.** Every configured residue is validated against the canonical sequence. Mismatches are dropped and reported.

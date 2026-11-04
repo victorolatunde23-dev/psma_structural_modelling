@@ -251,3 +251,26 @@ The full design is in `docs/M6_ZINC_PARAMETERS.md`.
 - **A water self-test** (frequencies against the literature, plus pymsmt read-back) gates the metal-site QM.
 
 **Changed in Milestone 5:** `preparation.zn_md_treatment` is now `bonded_mcpb` and the new `preparation.zn_bridge` is `hydroxide`. The readiness item "bridging water / hydroxide" passes when a species is chosen and Glu424's default state is consistent with it.
+
+
+## Milestone 6, part B — membrane system build and minimisation (v0.7.0)
+
+**New output:** `outputs/<ACC>_md_setup_system.xlsx` (notebook 05 part B), `md_system_tables/` and `md_setup/system/` (`system.prmtop`/`.inpcrd`, `system.xml`, `system_minimised.pdb`, smoke-run state). The sheets are:
+- SoluteSummary, ZnTemplateMap, GlycanLinks
+- Composition, MergeSummary, TleapBuild
+- Minimisation, SystemSummary, SystemChecks, MDReadiness
+- SystemIssues, Software, Reproducibility, DataDictionary
+
+The full design is in `docs/M6_SYSTEM_BUILD.md`.
+
+**User decision:** proceed with the placeholder membrane (POPC:CHL1 7:3) and core GlcNAc at all observed sites; a CHARMM-GUI build will be compared later. Both are listed as WARNING assumptions in MDReadiness.
+
+**Design decisions:**
+- **packmol-memgen packs around the protein only**; the full solute (both Zn sites, hydroxides, glycans, ions) is superposed back and clashing molecules are removed whole.
+- **Chain B's Zn site reuses chain A's MCPB.py templates**, matched by ligand residues; part A's residue numbers (tleap's 1…n) are translated to UniProt numbering.
+- **Readiness can be READY** for the first time: no FAIL, with the assumptions as WARNINGs.
+- **Zn geometry check on the minimised structure** (0.3 Å); the smoke run allows twice that for thermal motion.
+
+**New config:** `md.system` (lipids, ratio, salt, margins, clash cut-off, force fields) and `md.openmm` (cut-off, restraints, tolerances, smoke-run lengths, temperature).
+
+**Notebook 05:** part B sections F–J; setup installs packmol and OpenMM from conda-forge.

@@ -37,6 +37,6 @@ Status key:
 | 12 | Ligands: apo system (template ligands and additives removed and listed); parameters for any kept ligand in M6 | `model_preparation.py` | ✅ |
 | 13 | Glycosylation: sequon observations, core GlcNAc where observed (template / transplanted, clash-checked), LINK records | `glycans.py`, `model_preparation.py` | ✅ offline; 🟡 Colab; full glycoforms not modelled (decision) |
 | 15 | Membrane and construct context | `membrane.py` (membrane part), `model_preparation.py` (M5) | 🟠 membrane part ✅ offline: UniProt/DeepTMHMM topology, C2-constrained placement, membrane QC, construct context, membrane-ready CHARMM-GUI/packmol-memgen inputs + readiness (never READY); 🟡 real data in Colab; construct repairs ✅ M5 (`model_preparation.py`) |
-| 16 | MD-readiness validator | `md_readiness.py` | ⬜ M6 |
-| 17 | MD system setup (engine-agnostic, OpenMM) | `zinc_params.py` (part A ✅); system build + minimisation (part B) | 🟠 part A done; part B ⬜ |
+| 16 | MD-readiness validator | `system_build.py` (`MDReadiness`) | ✅ offline; 🟡 Colab M6B |
+| 17 | MD system setup (engine-agnostic, OpenMM) | `zinc_params.py` (part A), `system_build.py` (part B: packmol-memgen, tleap, OpenMM) | ✅ offline (fake packmol-memgen/tleap); 🟡 Colab runs A and B pending |
 | 18 | Trajectory analysis | `trajectory_analysis.py` | ⬜ M7 |

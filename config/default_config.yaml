@@ -465,3 +465,21 @@ md:                             # Milestone 6: system setup (notebook 05)
     bondfc_avg: 1
     anglefc_avg: 1
     qm_method: B3LYP/6-31G*     # MCPB.py default; run with PySCF (Gaussian B3LYP = b3lypg, UltraFine grid)
+  system:                       # part B: membrane system build (system_build.py)
+    lipids: "POPC:CHL1"         # ASSUMPTION (user: proceed with the placeholder; compare with CHARMM-GUI later)
+    ratio: "7:3"
+    salt_cation: "Na+"
+    salt_molar: 0.15
+    dist: 15.0                  # Å, protein to box edge in x/y (packmol-memgen --dist)
+    dist_wat: 17.5              # Å, water layer above/below the protein (--dist_wat)
+    clash_cutoff: 1.6           # Å; whole lipid / water molecules closer than this to the solute are removed
+    lipid_ff: lipid21
+    glycan_ff: GLYCAM_06j-1
+  openmm:                       # minimisation and smoke test (OpenMM, Colab GPU)
+    cutoff_nm: 1.0
+    restraint_kcal: 10.0        # kcal/mol/Å² on protein heavy atoms in the restrained stages
+    min_tolerance: 10.0         # kJ/mol/nm
+    max_force_ok: 1000.0        # kJ/mol/nm; largest force after minimisation
+    zn_bond_max_change: 0.3     # Å; Zn–ligand distance change allowed through minimisation / smoke run
+    smoke_ps: [20, 20]          # restrained NVT heating to 310 K, then restrained NPT (membrane barostat); [] = skip
+    temperature_k: 310
