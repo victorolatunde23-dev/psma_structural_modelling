@@ -41,6 +41,7 @@ from .status import IssueLog, Status
 log = logging.getLogger("psma_pipeline.model_preparation")
 
 BACKBONE = ["N", "CA", "C"]
+PEPTIDE_CN = 1.33   # Å, ideal peptide C–N bond
 ATOM_COLS = ["chain", "resname", "resnum", "atom", "element", "x", "y", "z", "b", "kind", "source"]
 
 
@@ -186,6 +187,7 @@ def build_hybrid(asm: pd.DataFrame, af: AFModel, useq: str, cfg: Any, issues: Is
     flank = int(pc.get("local_flank", 4))
     search = int(pc.get("junction_search", 12))
     cn_max = float(pc.get("junction_max_cn", 2.0))
+    cn_min = float(pc.get("junction_min_cn", 1.1))
     fit = global_dimer_fit(asm, af, cfg)
     R, pm, qm = fit["R"], fit["pm"], fit["qm"]
     L = len(useq)
@@ -237,7 +239,7 @@ def build_hybrid(asm: pd.DataFrame, af: AFModel, useq: str, cfg: Any, issues: Is
                         break
                     nxt = res.get(jb + 1)
                     d = _cn(F[jb], nxt[0]) if nxt is not None else None
-                    if d is not None and (best is None or d < best[1] - 1e-9):
+                    if d is not None and better_graft(d, best[1] if best else None):
                         best = (jb, d)
                 jb, d = best if best else (b, None)
                 for u in range(a, jb + 1):
@@ -317,11 +319,10 @@ def build_hybrid(asm: pd.DataFrame, af: AFModel, useq: str, cfg: Any, issues: Is
     atoms = pd.DataFrame(atoms_out, columns=ATOM_COLS)
     junc = pd.DataFrame(junc_rows)
     if len(junc):
-        junc["Status"] = [Status.PASS.value if d is not None and d <= cn_max else Status.WARNING.value
-                          for d in junc["Peptide C–N (Å)"]]
+        junc["Status"] = [junction_status(d, cn_min, cn_max).value for d in junc["Peptide C–N (Å)"]]
         for _, r in junc[junc["Status"] == Status.WARNING.value].iterrows():
             issues.add("preparation", Status.WARNING, f"chain {r['Chain']} junction {r['Junction']}: C–N "
-                       f"{r['Peptide C–N (Å)']} Å > {cn_max} Å (stretched peptide bond; minimise before MD)")
+                       f"{r['Peptide C–N (Å)']} Å outside {cn_min}–{cn_max} Å (distorted peptide bond; minimise before MD)")
     hetero, het_atoms = select_hetero(asm, atoms, chain_map, cfg, template)
     atoms = pd.concat([atoms, het_atoms], ignore_index=True)
     fit_info = {"Global fit RMSD (Å)": round(fit["rmsd"], 3), "Global fit residues": fit["n"],
@@ -331,6 +332,18 @@ def build_hybrid(asm: pd.DataFrame, af: AFModel, useq: str, cfg: Any, issues: Is
 
 
 THREE_TO_ONE_INV = {v: k for k, v in THREE_TO_ONE.items() if k not in ("MSE", "UNK")}
+
+
+def better_graft(d: float, current: float | None) -> bool:
+    """True if C–N distance ``d`` is closer to an ideal peptide bond than ``current``.
+
+    Not simply the shortest: atoms closer than a bond (overlap) are as bad as a stretched bond.
+    """
+    return current is None or abs(d - PEPTIDE_CN) < abs(current - PEPTIDE_CN) - 1e-9
+
+
+def junction_status(d: float | None, cn_min: float = 1.1, cn_max: float = 2.0) -> Status:
+    return Status.PASS if d is not None and not pd.isna(d) and cn_min <= d <= cn_max else Status.WARNING
 
 
 def _mean_pl(pl: dict, a: int, b: int) -> float | None:
@@ -1045,8 +1058,8 @@ def readiness(t: dict, cfg: Any, t_status: Status, t_detail: str, propka_ok: boo
     j = t["Junctions"]
     bad = j[j["Status"] != Status.PASS.value] if len(j) else j
     add("graft junctions", Status.PASS if not len(bad) else Status.WARNING,
-        f"{len(j)} junctions; " + (", ".join(f"{r.Chain}{r.Junction}" for r in bad.itertuples()) + " stretched (minimise first)"
-                                  if len(bad) else "all peptide C–N within limit"))
+        f"{len(j)} junctions; " + (", ".join(f"{r.Chain}{r.Junction}" for r in bad.itertuples()) + " outside the C–N limits (minimise first)"
+                                  if len(bad) else "all peptide C–N within limits"))
     c = t["Clashes"]
     n_c = int(c.attrs.get("total_pairs", len(c)))
     add("heavy-atom clashes", Status.PASS if not n_c else Status.WARNING,
@@ -1116,7 +1129,7 @@ def preparation_checks(atoms, useq, before, after, zn_tab, junctions, clashes, m
     add("provenance_complete", Status.PASS if not missing else Status.FAIL,
         f"{len(out_files)} output files recorded" if not missing else "not recorded: " + ", ".join(missing))
     bad = junctions[junctions["Status"] != Status.PASS.value] if len(junctions) else junctions
-    add("junction_geometry", Status.PASS if not len(bad) else Status.WARNING, f"{len(bad)} stretched of {len(junctions)}")
+    add("junction_geometry", Status.PASS if not len(bad) else Status.WARNING, f"{len(bad)} distorted of {len(junctions)}")
     n_c = int(clashes.attrs.get("total_pairs", len(clashes)))
     add("heavy_atom_clashes", Status.PASS if not n_c else Status.WARNING, f"{n_c} pairs" + (
         f" ({len(clashes)} closest listed)" if n_c > len(clashes) else ""))

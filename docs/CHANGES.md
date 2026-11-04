@@ -218,3 +218,9 @@ The full design is in `docs/M5_MODEL_PREPARATION.md`.
 - **Only the core GlcNAc is modelled.** Crystallographic glycans are fragments. Transplants are clash-checked, and a rejected transplant falls through to the next donor.
 - **Protonation is written as residue names**, with heavy atoms only. Zn-ligand residues are fixed. Alternatives cover residues within 1 pH unit of their pKa plus the catalytic E424, one residue per microstate.
 - **Originals are hashed before and after the run** (critical), and every output appears in the provenance.
+
+### Milestone 5 — fixes after the first Colab run (9S7U + CF:dimer:rank_001)
+
+- **Graft point (bug).** The N-terminal graft point minimised the peptide C–N distance, so it picked overlapping atoms (0.75 Å). That passed, because only bonds above 2.0 Å were flagged. The graft point is now the one closest to the ideal 1.33 Å, and a junction is a WARNING outside 1.1–2.0 Å (`junction_min_cn`, `junction_max_cn`).
+- **Zn geometry check.** For each ligand residue, only the closest donor atom is range-checked. The second oxygen of a monodentate Asp (D453 OD1, 2.76 Å) is still listed in ZnContacts, but no longer flagged.
+- **pandas warning.** `rank_models` builds the top table from records.

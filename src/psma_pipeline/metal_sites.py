@@ -73,7 +73,9 @@ def zn_coordination(atoms: pd.DataFrame, cfg: Any) -> tuple[pd.DataFrame, pd.Dat
                              "Atom": a["atom"], "Kind": a["kind"], "Distance (Å)": round(float(a["dist"]), 3),
                              "In range": bool(lo <= a["dist"] <= hi)})
         missing = sorted(expected.get(site, set()) - lig_res)
-        bad = prot[(prot["dist"] < lo) | (prot["dist"] > hi)]
+        # one donor per residue (the closest): the second carboxylate O of a monodentate Asp/Glu is not a bond
+        closest = prot.sort_values("dist").drop_duplicates(["chain", "resnum"])
+        bad = closest[(closest["dist"] < lo) | (closest["dist"] > hi)]
         st, warn = Status.PASS, []
         if missing:
             st = Status.FAIL

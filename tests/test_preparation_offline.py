@@ -80,6 +80,31 @@ def test_junctions_and_numbering(result, inputs):
     assert (checks.query("Check == 'numbering_identity'")["Status"] == "PASS").all()
 
 
+def test_graft_point_prefers_ideal_peptide_bond():
+    """Regression (first Colab run): the shortest C–N (0.75 Å, overlapping atoms) was chosen and passed."""
+    best = None
+    for d in (2.4, 0.75, 1.45, 1.9):
+        if MP.better_graft(d, best):
+            best = d
+    assert best == 1.45
+    assert MP.junction_status(0.75) is Status.WARNING and MP.junction_status(2.4) is Status.WARNING
+    assert MP.junction_status(1.33) is Status.PASS and MP.junction_status(None) is Status.WARNING
+
+
+def test_monodentate_carboxylate_not_flagged(pcfg):
+    """Regression: D453 binds Zn1 through OD2 (2.0 Å); its OD1 at 2.76 Å must not count as a bad bond."""
+    from psma_pipeline.metal_sites import zn_coordination
+    rows = [("A", "ZN", 3001, "ZN", "ZN", 0.0, 0.0, 0.0, "ion"),
+            ("A", "HIS", 377, "NE2", "N", 2.1, 0.0, 0.0, "protein"),
+            ("A", "ASP", 387, "OD1", "O", 0.0, 1.95, 0.0, "protein"),
+            ("A", "ASP", 453, "OD2", "O", 0.0, 0.0, 2.0, "protein"),
+            ("A", "ASP", 453, "OD1", "O", -1.5, 0.0, 2.3, "protein")]
+    atoms = pd.DataFrame(rows, columns=["chain", "resname", "resnum", "atom", "element", "x", "y", "z", "kind"])
+    tab, contacts = zn_coordination(atoms, pcfg)
+    assert tab.iloc[0]["Site"] == "Zn1" and tab.iloc[0]["Status"] == "PASS", tab.iloc[0]["Warning"]
+    assert len(contacts) == 4                                   # OD1 still listed in ZnContacts
+
+
 def test_hetero_selection(result):
     het = result.tables["TemplateHetero"]
     kept = set(het.loc[het["Decision"] == "kept", "Component"])

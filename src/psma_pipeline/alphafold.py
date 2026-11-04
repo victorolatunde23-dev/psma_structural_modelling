@@ -882,14 +882,10 @@ def rank_models(summary: pd.DataFrame, cfg: Any, issues: IssueLog, top_n: int = 
         r.insert(0, "Ranking mode", name)
         r["Mode description"] = mode.get("description", "")
         outs.append(r)
-        if len(r):
-            t = r.head(top_n)[["Ranking mode", "Model ID", "Rank", "Score (0-1, higher = better)"]].copy()
-            t["Models eligible"] = len(r)
-            tops.append(t)
+        for rec in r.head(top_n)[["Ranking mode", "Model ID", "Rank", "Score (0-1, higher = better)"]].to_dict("records"):
+            tops.append({**rec, "Models eligible": len(r)})
     outs = [o.dropna(axis=1, how="all") for o in outs if len(o)]
-    tops = [t for t in tops if len(t)]
-    return (pd.concat(outs, ignore_index=True) if outs else pd.DataFrame(),
-            pd.concat(tops, ignore_index=True) if tops else pd.DataFrame())
+    return (pd.concat(outs, ignore_index=True) if outs else pd.DataFrame(), pd.DataFrame(tops))
 
 
 def variant_alphafold_columns(mapping: pd.DataFrame, res_conf: pd.DataFrame, model_id: str | None = None) -> pd.DataFrame:

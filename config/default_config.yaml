@@ -425,7 +425,8 @@ preparation:                    # Milestone 5: model preparation (notebook 04, m
   fit_plddt_min: 70             # AlphaFold2 residues used for the global dimer superposition
   local_flank: 4                # residues on each side for the local fit of a gap segment
   junction_search: 12           # N-terminal graft point is searched over this many experimental residues
-  junction_max_cn: 2.0          # Å; peptide C–N at a graft point above this = WARNING
+  junction_max_cn: 2.0          # Å; peptide C–N at a graft point outside junction_min_cn–junction_max_cn = WARNING
+  junction_min_cn: 1.1          # Å; the graft point is chosen closest to the ideal 1.33 Å
   clash_heavy_min: 2.2          # Å; non-bonded heavy-atom pairs closer than this = clash (WARNING)
   keep_ions: [ZN, CA, CL]       # ions kept from the template
   keep_waters: zn_shell         # zn_shell (waters within water_zn_max of a Zn) | none | all
