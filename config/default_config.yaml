@@ -465,6 +465,9 @@ md:                             # Milestone 6: system setup (notebook 05)
     bondfc_avg: 1
     anglefc_avg: 1
     qm_method: B3LYP/6-31G*     # MCPB.py default; run with PySCF (Gaussian B3LYP = b3lypg, UltraFine grid)
+    qm_opt: hydrogens           # USER DECISION: optimise only H atoms; heavy atoms stay at the 9S7U positions, so the
+                                # Zn–ligand r0 values are the experimental ones. A full gas-phase optimisation
+                                # (qm_opt: full) shifted D453 to bidentate and E425 to monodentate (first Colab run).
   system:                       # part B: membrane system build (system_build.py)
     lipids: "POPC:CHL1"         # ASSUMPTION (user: proceed with the placeholder; compare with CHARMM-GUI later)
     ratio: "7:3"

@@ -354,9 +354,9 @@ def run_zinc_parameters(cfg: Any, prepared_pdb: str | Path | None = None, issues
     _step(prov, "MCPB.py step 1 (models + Gaussian inputs)", "MCPB.py -s 1", [wd / f"{group}.in", mcpb_pdb], coms)
 
     # ---- 3. QM with PySCF ------------------------------------------------------------------------------
-    qm = Q.run_mcpb_qm(wd, group, use_gpu)
+    qm = Q.run_mcpb_qm(wd, group, use_gpu, opt_mode=str(m.get("qm_opt", "hydrogens")))
     sm = qm["small model"]
-    if sm.get("imaginary frequencies < -50 cm-1", 0):
+    if sm.get("imaginary frequencies < -50 cm-1", 0) and str(m.get("qm_opt", "hydrogens")) == "full":
         issues.add("zinc", Status.WARNING, f"small model has {sm['imaginary frequencies < -50 cm-1']} imaginary "
                    "frequencies below -50 cm-1: the optimised geometry may not be a minimum")
     _step(prov, "QM (PySCF bridge)", f"PySCF {qm.get('pyscf')} ({'GPU' if qm.get('gpu') else 'CPU'})", coms,
@@ -432,7 +432,11 @@ def zinc_checks(t: dict, lg: dict, before: dict, after: dict, qm: dict, cfg: Any
     conv = bool(sm.get("optimisation converged"))
     add("qm_converged", Status.PASS if conv else Status.FAIL, f"small-model optimisation converged: {conv}")
     nimg = int(sm.get("imaginary frequencies < -50 cm-1", 0) or 0)
-    add("qm_minimum", Status.PASS if nimg == 0 else Status.WARNING, f"{nimg} imaginary frequencies below -50 cm-1")
+    held = "heavy atoms held" in str(sm.get("optimisation", ""))
+    add("qm_minimum", Status.PASS if nimg == 0 else Status.WARNING,
+        f"{nimg} imaginary frequencies below -50 cm-1"
+        + (" (expected: heavy atoms held at the crystal positions, so not a QM minimum; Seminario force "
+           "constants are still taken from the Hessian at the experimental geometry)" if held and nimg else ""))
     ok = lg.get("errors") == 0 and not lg.get("missing parameters")
     add("tleap_build", Status.PASS if ok else Status.FAIL,
         f"errors {lg.get('errors')}, missing parameters {len(lg.get('missing parameters') or [])}")

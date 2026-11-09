@@ -303,16 +303,24 @@ def gpu_available() -> bool:
     return ok
 
 
-def run_opt(job: GaussianJob, workdir: Path, use_gpu: bool, maxsteps: int = 200) -> tuple[np.ndarray, float, dict]:
-    """Geometry optimisation with geomeTRIC; frozen atoms (flag -1) are fixed. Returns Å coords, energy, info."""
+def run_opt(job: GaussianJob, workdir: Path, use_gpu: bool, maxsteps: int = 200,
+            freeze_heavy: bool = False) -> tuple[np.ndarray, float, dict]:
+    """Geometry optimisation with geomeTRIC; frozen atoms (flag -1) are fixed. Returns Å coords, energy, info.
+
+    ``freeze_heavy``: hold every non-hydrogen atom at its input (crystal) position and optimise only the
+    hydrogens, so the metal-site geometry, and hence MCPB.py's equilibrium bond lengths and angles,
+    stay those of the experimental structure. Its caches have their own names (``*.hopt.*``), so a
+    full optimisation's files are never mixed in."""
     from pyscf.geomopt.geometric_solver import kernel as geom_kernel
-    cache = workdir / f"{job.path.stem}.pyscf.npz"
+    tag = ".hopt" if freeze_heavy else ""
+    frozen = [bool(f) or (freeze_heavy and e != "H") for f, e in zip(job.frozen, job.elements)]
+    cache = workdir / f"{job.path.stem}{tag}.pyscf.npz"
     if cache.exists():
         d = np.load(cache)
         if bool(d["converged"]):
             log.info("optimisation reused from %s", cache.name)
             return d["coords"], float(d["energy"]), {"reused": True, "converged": True}
-    ckpt = workdir / f"{job.path.stem}.opt_checkpoint.npz"
+    ckpt = workdir / f"{job.path.stem}{tag}.opt_checkpoint.npz"
     start = None
     if ckpt.exists():                       # resume an interrupted optimisation from its last geometry
         d = np.load(ckpt)
@@ -329,23 +337,26 @@ def run_opt(job: GaussianJob, workdir: Path, use_gpu: bool, maxsteps: int = 200)
             return
         step["n"] += 1
         try:
-            tmp = workdir / f"{job.path.stem}.opt_checkpoint.tmp.npz"
+            tmp = workdir / f"{job.path.stem}{tag}.opt_checkpoint.tmp.npz"
             np.savez(tmp, coords=np.asarray(m.atom_coords(unit="Angstrom")), step=step["n"])
             tmp.replace(ckpt)
         except Exception as ex:  # noqa: BLE001 - a failed checkpoint must not stop the optimisation
             log.warning("checkpoint not written: %s", ex)
     params = {"callback": save_step}
-    if any(job.frozen):
-        cfile = workdir / f"{job.path.stem}.constraints"
-        cfile.write_text("$freeze\nxyz " + ",".join(str(i + 1) for i, f in enumerate(job.frozen) if f) + "\n")
+    if any(frozen):
+        cfile = workdir / f"{job.path.stem}{tag}.constraints"
+        cfile.write_text("$freeze\nxyz " + ",".join(str(i + 1) for i, f in enumerate(frozen) if f) + "\n")
         params["constraints"] = str(cfile)
     t0 = time.time()
     conv, mol_eq = geom_kernel(mf, maxsteps=maxsteps, **params)
     xyz = mol_eq.atom_coords(unit="Angstrom")
     mf2 = _scf(mol_eq, job, use_gpu)
     np.savez(cache, coords=xyz, energy=mf2.e_tot, converged=conv)
+    if freeze_heavy:                         # exactly the input heavy-atom positions (no numerical drift)
+        heavy = np.array([e != "H" for e in job.elements])
+        xyz[heavy] = job.coords[heavy]
     return xyz, float(mf2.e_tot), {"converged": bool(conv), "minutes": round((time.time() - t0) / 60, 1),
-                                   "steps": step["n"], "resumed": start is not None}
+                                   "steps": step["n"], "resumed": start is not None, "frozen atoms": int(sum(frozen))}
 
 
 def run_hessian(job: GaussianJob, coords: np.ndarray, workdir: Path, use_gpu: bool) -> tuple[np.ndarray, float]:
@@ -412,11 +423,15 @@ def run_mk(job: GaussianJob, workdir: Path, use_gpu: bool) -> tuple[np.ndarray, 
 # ---------------------------------------------------------------------------
 # MCPB.py workflow glue
 # ---------------------------------------------------------------------------
-def run_mcpb_qm(workdir: str | Path, group: str, use_gpu: bool | None = None) -> dict:
+def run_mcpb_qm(workdir: str | Path, group: str, use_gpu: bool | None = None, opt_mode: str = "hydrogens") -> dict:
     """Run the three MCPB.py QM jobs of ``group`` in ``workdir`` and write the files MCPB.py reads.
 
-    Returns a summary dict (also written to ``<group>_pyscf_summary.json``).
+    ``opt_mode``: ``"hydrogens"`` (default) optimises only the hydrogens of the small model, keeping the
+    heavy atoms (and so the Zn–ligand geometry) at the experimental positions; ``"full"`` is MCPB.py's
+    standard full optimisation. Returns a summary dict (also written to ``<group>_pyscf_summary.json``).
     """
+    if opt_mode not in ("hydrogens", "full"):
+        raise ValueError(f"opt_mode must be 'hydrogens' or 'full', not {opt_mode!r}")
     workdir = Path(workdir)
     use_gpu = gpu_available() if use_gpu is None else use_gpu
     summary: dict = {"group": group, "gpu": use_gpu, "gpu status": gpu_status()[1]}
@@ -427,12 +442,18 @@ def run_mcpb_qm(workdir: str | Path, group: str, use_gpu: bool | None = None) ->
         raise ImportError("PySCF is required: pip install pyscf geometric") from ex
 
     opt = parse_gaussian_input(workdir / f"{group}_small_opt.com")
-    xyz, e_opt, info = run_opt(opt, workdir, use_gpu)
+    xyz, e_opt, info = run_opt(opt, workdir, use_gpu, freeze_heavy=opt_mode == "hydrogens")
     rms_move = float(np.sqrt(np.mean(np.sum((xyz - opt.coords) ** 2, axis=1))))
+    hv = np.array([e != "H" for e in opt.elements])
+    heavy_move = float(np.abs(xyz[hv] - opt.coords[hv]).max()) if hv.any() else 0.0
     summary["small model"] = {"atoms": len(opt.elements), "charge": opt.charge, "multiplicity": opt.mult,
                               "method": f"{opt.method}/{opt.basis} (PySCF {FUNCTIONALS.get(opt.method.upper(), opt.method)})",
                               "optimisation converged": info.get("converged"), "energy (Eh)": e_opt,
-                              "RMS displacement from input (Å)": round(rms_move, 3)}
+                              "RMS displacement from input (Å)": round(rms_move, 3),
+                              "optimisation": ("hydrogens only; heavy atoms held at the crystal positions"
+                                               if opt_mode == "hydrogens" else "full"),
+                              "max heavy-atom displacement (Å)": round(heavy_move, 4),
+                              "optimisation steps": info.get("steps")}
     if not info.get("converged"):
         raise RuntimeError("small-model optimisation did not converge: Seminario force constants would be unreliable")
     H, e_h = run_hessian(opt, xyz, workdir, use_gpu)

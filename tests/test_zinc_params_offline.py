@@ -306,8 +306,9 @@ def fake_amber(tmp_path, monkeypatch):
 def test_run_zinc_parameters_orchestration(cfg, tmp_path, fake_amber, monkeypatch):
     calls = {}
 
-    def fake_qm(wd, group, use_gpu=None):
+    def fake_qm(wd, group, use_gpu=None, opt_mode="full"):
         calls["qm"] = (Path(wd), group)
+        calls["opt_mode"] = opt_mode
         for n in ("small_opt.fchk", "large_mk.log"):
             (Path(wd) / f"{group}_{n}").write_text("fake")
         s = {"group": group, "gpu": False, "pyscf": "test",
@@ -320,7 +321,7 @@ def test_run_zinc_parameters_orchestration(cfg, tmp_path, fake_amber, monkeypatc
     before = pdb.read_bytes()
     res = ZP.run_zinc_parameters(cfg, pdb, IssueLog())
     t = res.tables
-    assert calls["qm"][1] == "PSMA"
+    assert calls["qm"][1] == "PSMA" and calls["opt_mode"] == "hydrogens"
     checks = t["ZincChecks"].set_index("Check")
     assert (t["ZincChecks"].query("Critical")["Status"] == "PASS").all(), t["ZincChecks"].to_string()
     zb = t["ZnBonds"]
@@ -404,3 +405,42 @@ def test_opt_checkpoint_and_resume(tmp_path, monkeypatch):
     xyz, e, info = Q.run_opt(job, tmp_path, False)
     assert info["resumed"] and info["steps"] == 5 and np.allclose(seen["starts"][-1], job.coords + 0.02)
     assert np.allclose(xyz, job.coords + 0.05)
+
+
+def test_hydrogen_only_optimisation(tmp_path, monkeypatch):
+    """qm_opt: hydrogens freezes every heavy atom, uses its own cache names and returns the exact input heavy atoms."""
+    import types
+    com = tmp_path / "Z_small_opt.com"
+    com.write_text("%Chk=Z\n# B3LYP/6-31G* Opt\n\nz\n\n0  1\nZn 0.0 0.0 0.0\nO 1.9 0.0 0.0\nH 2.3 0.8 0.0\n\n")
+    job = Q.parse_gaussian_input(com)
+    (tmp_path / "Z_small_opt.opt_checkpoint.npz").write_bytes(b"not a full-opt checkpoint to reuse")
+    got = {}
+
+    class Mol:
+        def __init__(self, xyz):
+            self.xyz = np.asarray(xyz, float)
+
+        def atom_coords(self, unit="Angstrom"):
+            return self.xyz
+
+    class MF:
+        def __init__(self, mol):
+            self.mol, self.e_tot = mol, -1.0
+
+    def kernel(mf, maxsteps=200, callback=None, constraints=None, **kw):
+        got["constraints"] = Path(constraints).read_text()
+        x = mf.mol.xyz + np.array([[1e-7, 0, 0], [0, 1e-7, 0], [0.0, 0.1, 0.0]])   # H moves; heavy drift tiny
+        callback({"mol": Mol(x)})
+        return True, Mol(x)
+
+    mods = {"pyscf": types.ModuleType("pyscf"), "pyscf.geomopt": types.ModuleType("pyscf.geomopt"),
+            "pyscf.geomopt.geometric_solver": types.ModuleType("pyscf.geomopt.geometric_solver")}
+    mods["pyscf.geomopt.geometric_solver"].kernel = kernel
+    for k, v in mods.items():
+        monkeypatch.setitem(sys.modules, k, v)
+    monkeypatch.setattr(Q, "_pyscf_mol", lambda j, c=None: Mol(j.coords if c is None else c))
+    monkeypatch.setattr(Q, "_scf", lambda mol, j, g: MF(mol))
+    xyz, e, info = Q.run_opt(job, tmp_path, False, freeze_heavy=True)
+    assert got["constraints"].strip() == "$freeze\nxyz 1,2" and info["frozen atoms"] == 2
+    assert np.array_equal(xyz[:2], job.coords[:2]) and abs(xyz[2, 1] - (job.coords[2, 1] + 0.1)) < 1e-9
+    assert (tmp_path / "Z_small_opt.hopt.pyscf.npz").exists() and (tmp_path / "Z_small_opt.hopt.opt_checkpoint.npz").exists()

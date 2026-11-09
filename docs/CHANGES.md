@@ -298,3 +298,10 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 ### Colab GPU for PySCF (v0.7.4)
 
 - Setup no longer assumes gpu4pyscf works once pip has installed it. It asks the MD environment whether PySCF can see the GPU. If not, it adds the CUDA libraries as pip wheels (`cupy-cuda12x[ctk]`, `nvidia-*-cu12`) and checks again, then prints the outcome and the reason.
+
+### Zinc QM: hydrogens-only optimisation (v0.7.5)
+
+- **User decision after the first GPU run:** the full gas-phase optimisation of the small model rearranged the site. D453 went bidentate on Zn1 (OD1 2.76 → 2.22 Å) and E425 OE1 drifted off Zn2 (2.45 → 2.73 Å) by step 65. The Colab session then ended before convergence.
+- **New `md.mcpb.qm_opt: hydrogens` (default):** every heavy atom is frozen, and only the hydrogens are optimised. MCPB.py's r0/θ0 are therefore the 9S7U values; the QM supplies the force constants and charges. `qm_opt: full` restores the standard full optimisation.
+- The hydrogens-only run has its own cache and checkpoint names (`*.hopt.*`), so nothing from the earlier full optimisation is reused.
+- `QMSummary` now records the optimisation mode, the number of steps and the largest heavy-atom displacement (0). The `qm_minimum` note explains that imaginary frequencies are expected in this mode.
