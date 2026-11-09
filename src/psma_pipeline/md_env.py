@@ -69,7 +69,9 @@ def versions(prefix: str = ENV_PREFIX) -> dict:
     code = ("import json, importlib\nv={}\nfor m in ('pyscf','openmm','pandas','numpy'):\n"
             "    try: v[m]=importlib.import_module(m).__version__\n    except Exception as e: v[m]=None\n"
             "try:\n    import openmm as o; v['openmm platforms']=[o.Platform.getPlatform(i).getName() for i in range(o.Platform.getNumPlatforms())]\n"
-            "except Exception: pass\nprint(json.dumps(v))")
+            "except Exception: pass\n"
+            "try:\n    from psma_pipeline.qm_bridge import gpu_status; v['PySCF on GPU']=gpu_status()\n"
+            "except Exception as e: v['PySCF on GPU']=str(e)\nprint(json.dumps(v))")
     r = subprocess.run([str(env_python(prefix)), "-c", code], capture_output=True, text=True)
     try:
         return json.loads(r.stdout.strip().splitlines()[-1])

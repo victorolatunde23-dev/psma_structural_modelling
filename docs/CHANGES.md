@@ -279,3 +279,8 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 
 - **Bug (first Colab run):** `mamba install ambertools … openmm` failed. Colab's Python is now 3.13, which condacolab pins, and AmberTools has no conda build for it.
 - **Fix:** the MD tools no longer go into Colab's Python. Notebook 05 builds a **separate micromamba environment with Python 3.11** (`psma_pipeline.md_env`, ~5–10 min, no runtime restart). The QM self-test, zinc parameters and system build run there through `scripts/run_md_setup.py`; results come back as JSON tables for display. condacolab is no longer used.
+
+### Milestone 6 — QM resume and GPU diagnosis (v0.7.2)
+
+- **The geometry optimisation now saves its geometry after every step** (`*.opt_checkpoint.npz` on Drive). A disconnected Colab run resumes from the last step instead of starting over.
+- **The reason PySCF is not on the GPU is reported:** `qm_bridge.gpu_status()`, shown in setup cell 0b ("PySCF on GPU"), the self-test and the QM summary. In the first Colab run the runtime had a GPU, but PySCF ran on the CPU (`gpu: false`).

@@ -277,13 +277,30 @@ def _hessian(mf):
     return np.asarray(h.get() if hasattr(h, "get") else h)
 
 
-def gpu_available() -> bool:
+def gpu_status() -> tuple[bool, str]:
+    """(usable, reason): whether PySCF can run on the GPU here, and why not."""
     try:
-        import cupy  # noqa: F401
-        import gpu4pyscf  # noqa: F401
-        return cupy.cuda.runtime.getDeviceCount() > 0
-    except Exception:  # noqa: BLE001
-        return False
+        import cupy
+    except Exception as ex:  # noqa: BLE001
+        return False, f"cupy not importable: {ex}"
+    try:
+        import gpu4pyscf
+    except Exception as ex:  # noqa: BLE001
+        return False, f"gpu4pyscf not importable: {ex}"
+    try:
+        n = cupy.cuda.runtime.getDeviceCount()
+    except Exception as ex:  # noqa: BLE001
+        return False, f"CUDA not usable by cupy: {ex}"
+    if n < 1:
+        return False, "no GPU visible to cupy"
+    return True, f"gpu4pyscf {getattr(gpu4pyscf, '__version__', '?')}, {n} GPU(s)"
+
+
+def gpu_available() -> bool:
+    ok, why = gpu_status()
+    if not ok:
+        log.warning("PySCF will run on the CPU: %s", why)
+    return ok
 
 
 def run_opt(job: GaussianJob, workdir: Path, use_gpu: bool, maxsteps: int = 200) -> tuple[np.ndarray, float, dict]:
@@ -295,9 +312,29 @@ def run_opt(job: GaussianJob, workdir: Path, use_gpu: bool, maxsteps: int = 200)
         if bool(d["converged"]):
             log.info("optimisation reused from %s", cache.name)
             return d["coords"], float(d["energy"]), {"reused": True, "converged": True}
-    mol = _pyscf_mol(job)
+    ckpt = workdir / f"{job.path.stem}.opt_checkpoint.npz"
+    start = None
+    if ckpt.exists():                       # resume an interrupted optimisation from its last geometry
+        d = np.load(ckpt)
+        if d["coords"].shape == job.coords.shape:
+            start = d["coords"]
+            log.info("resuming optimisation from %s (step %d)", ckpt.name, int(d["step"]))
+    mol = _pyscf_mol(job, start)
     mf = _scf(mol, job, use_gpu)
-    params = {}
+    step = {"n": int(np.load(ckpt)["step"]) if start is not None else 0}
+
+    def save_step(envs):                    # geomeTRIC callback: keep the latest geometry on Drive
+        m = envs.get("mol")
+        if m is None:
+            return
+        step["n"] += 1
+        try:
+            tmp = workdir / f"{job.path.stem}.opt_checkpoint.tmp.npz"
+            np.savez(tmp, coords=np.asarray(m.atom_coords(unit="Angstrom")), step=step["n"])
+            tmp.replace(ckpt)
+        except Exception as ex:  # noqa: BLE001 - a failed checkpoint must not stop the optimisation
+            log.warning("checkpoint not written: %s", ex)
+    params = {"callback": save_step}
     if any(job.frozen):
         cfile = workdir / f"{job.path.stem}.constraints"
         cfile.write_text("$freeze\nxyz " + ",".join(str(i + 1) for i, f in enumerate(job.frozen) if f) + "\n")
@@ -307,7 +344,8 @@ def run_opt(job: GaussianJob, workdir: Path, use_gpu: bool, maxsteps: int = 200)
     xyz = mol_eq.atom_coords(unit="Angstrom")
     mf2 = _scf(mol_eq, job, use_gpu)
     np.savez(cache, coords=xyz, energy=mf2.e_tot, converged=conv)
-    return xyz, float(mf2.e_tot), {"converged": bool(conv), "minutes": round((time.time() - t0) / 60, 1)}
+    return xyz, float(mf2.e_tot), {"converged": bool(conv), "minutes": round((time.time() - t0) / 60, 1),
+                                   "steps": step["n"], "resumed": start is not None}
 
 
 def run_hessian(job: GaussianJob, coords: np.ndarray, workdir: Path, use_gpu: bool) -> tuple[np.ndarray, float]:
@@ -381,7 +419,7 @@ def run_mcpb_qm(workdir: str | Path, group: str, use_gpu: bool | None = None) ->
     """
     workdir = Path(workdir)
     use_gpu = gpu_available() if use_gpu is None else use_gpu
-    summary: dict = {"group": group, "gpu": use_gpu}
+    summary: dict = {"group": group, "gpu": use_gpu, "gpu status": gpu_status()[1]}
     try:
         import pyscf
         summary["pyscf"] = pyscf.__version__
@@ -455,7 +493,7 @@ def self_test(workdir: str | Path, use_gpu: bool | None = None) -> dict:
     mk = GaussianJob(com, job.route + " Pop(MK)", "B3LYP", "6-31G*", 0, 1, job.elements, xyz, [False] * 3, {}, 6.0)
     pts, ea, ep, e2 = run_mk(mk, workdir, use_gpu)
     write_mk_log(workdir / "WAT_large_mk.log", job.elements, xyz, pts, ea, ep, e2)
-    res = {"gpu": use_gpu, "minutes": round((time.time() - t0) / 60, 2), "converged": info.get("converged"),
+    res = {"gpu": use_gpu, "gpu status": gpu_status()[1], "minutes": round((time.time() - t0) / 60, 2), "converged": info.get("converged"),
            "frequencies (cm-1)": [round(float(x), 1) for x in f],
            "max deviation from literature (cm-1)": round(float(np.max(np.abs(f - np.array(WATER_REF_CM1)))), 1),
            "MK points": int(len(pts))}

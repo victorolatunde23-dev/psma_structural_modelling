@@ -357,3 +357,50 @@ def test_missing_ambertools_is_fail(cfg, tmp_path, monkeypatch):
     issues = IssueLog()
     res = ZP.run_zinc_parameters(cfg, prepared_pdb(tmp_path / "p.pdb"), issues)
     assert issues.count(Status.FAIL) == 1 and "ZincChecks" not in res.tables
+
+
+def test_opt_checkpoint_and_resume(tmp_path, monkeypatch):
+    """geomeTRIC's callback saves each geometry; an interrupted run restarts from the last one."""
+    import types
+    com = tmp_path / "W_small_opt.com"
+    com.write_text("%Chk=W\n# B3LYP/6-31G* Opt\n\nw\n\n0  1\nO 0.0 0.0 0.2\nH 0.0 0.857 -0.469\nH 0.0 -0.757 -0.469\n\n")
+    job = Q.parse_gaussian_input(com)
+    seen = {}
+
+    class Mol:
+        def __init__(self, xyz):
+            self.xyz = np.asarray(xyz, float)
+
+        def atom_coords(self, unit="Angstrom"):
+            return self.xyz
+
+    class MF:
+        def __init__(self, mol):
+            self.mol, self.e_tot = mol, -76.0
+
+    def kernel(mf, maxsteps=200, callback=None, **kw):
+        seen.setdefault("starts", []).append(mf.mol.xyz.copy())
+        x = mf.mol.xyz.copy()
+        for k in range(3):
+            x = x + 0.01
+            callback({"mol": Mol(x), "energy": -76.0 - k})
+            if seen.get("crash") and k == 1:
+                raise KeyboardInterrupt
+        return True, Mol(x)
+
+    mods = {"pyscf": types.ModuleType("pyscf"), "pyscf.geomopt": types.ModuleType("pyscf.geomopt"),
+            "pyscf.geomopt.geometric_solver": types.ModuleType("pyscf.geomopt.geometric_solver")}
+    mods["pyscf.geomopt.geometric_solver"].kernel = kernel
+    for k, v in mods.items():
+        monkeypatch.setitem(sys.modules, k, v)
+    monkeypatch.setattr(Q, "_pyscf_mol", lambda j, c=None: Mol(j.coords if c is None else c))
+    monkeypatch.setattr(Q, "_scf", lambda mol, j, g: MF(mol))
+    seen["crash"] = True
+    with pytest.raises(KeyboardInterrupt):
+        Q.run_opt(job, tmp_path, False)
+    ck = np.load(tmp_path / "W_small_opt.opt_checkpoint.npz")
+    assert int(ck["step"]) == 2 and np.allclose(ck["coords"], job.coords + 0.02)
+    seen["crash"] = False
+    xyz, e, info = Q.run_opt(job, tmp_path, False)
+    assert info["resumed"] and info["steps"] == 5 and np.allclose(seen["starts"][-1], job.coords + 0.02)
+    assert np.allclose(xyz, job.coords + 0.05)
