@@ -294,3 +294,7 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
   - GPU packages only when `nvidia-smi` finds a card;
   - a clear message on native Windows.
 - `colab.local_overrides(DATA_DIR)` points the run at the synced Google Drive folder, so the results land with the Colab ones.
+
+### Colab GPU for PySCF (v0.7.4)
+
+- Setup no longer assumes gpu4pyscf works once pip has installed it. It asks the MD environment whether PySCF can see the GPU. If not, it adds the CUDA libraries as pip wheels (`cupy-cuda12x[ctk]`, `nvidia-*-cu12`) and checks again, then prints the outcome and the reason.

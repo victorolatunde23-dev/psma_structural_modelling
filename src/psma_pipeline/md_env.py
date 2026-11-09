@@ -108,16 +108,44 @@ def install_env(repo: str | Path, prefix: str | None = None, gpu: bool = True, l
     card = nvidia_gpu()
     gpu_ok = False
     if gpu and card and plat.startswith("linux"):
-        try:
-            _sh(f"'{py}' -m pip install -q gpu4pyscf-cuda12x cutensor-cu12", log)
-            gpu_ok = True
-        except RuntimeError:
-            print("gpu4pyscf not installed: PySCF will use the CPU")
+        gpu_ok = _ensure_pyscf_gpu(py, log)
     elif gpu:
         print("No NVIDIA GPU found (nvidia-smi): PySCF will use the CPU" if not card else
               "PySCF GPU support needs Linux or WSL2: PySCF will use the CPU")
     return {"machine": "Colab" if in_colab() else f"local ({plat})", "NVIDIA GPU": card, "prefix": prefix,
             "python": str(py), "gpu4pyscf installed": gpu_ok, "install log": str(log), **versions(prefix)}
+
+
+def pyscf_gpu_status(py: str | Path) -> tuple[bool, str]:
+    """Ask the MD environment itself whether PySCF can use the GPU (and why not)."""
+    r = subprocess.run([str(py), "-c", "import json; from psma_pipeline.qm_bridge import gpu_status; "
+                        "print(json.dumps(gpu_status()))"], capture_output=True, text=True)
+    try:
+        ok, why = json.loads(r.stdout.strip().splitlines()[-1])
+        return bool(ok), why
+    except Exception:  # noqa: BLE001
+        return False, (r.stderr or r.stdout)[-400:]
+
+
+def _ensure_pyscf_gpu(py: Path, log: Path) -> bool:
+    """Install gpu4pyscf and check it really works; if the CUDA libraries are missing, add them as pip
+    wheels (cupy's ``ctk`` extra) and check again. Prints the reason if PySCF still cannot use the GPU."""
+    attempts = [("gpu4pyscf", "gpu4pyscf-cuda12x cutensor-cu12"),
+                ("CUDA libraries for cupy", "'cupy-cuda12x[ctk]' nvidia-cuda-runtime-cu12 nvidia-cublas-cu12 "
+                                            "nvidia-cusolver-cu12 nvidia-cusparse-cu12 nvidia-curand-cu12 "
+                                            "nvidia-cufft-cu12 nvidia-cuda-nvrtc-cu12")]
+    why = "not tried"
+    for label, pkgs in attempts:
+        try:
+            _sh(f"'{py}' -m pip install -q {pkgs}", log)
+        except RuntimeError:
+            print(f"pip could not install {label}")
+        ok, why = pyscf_gpu_status(py)
+        if ok:
+            print("PySCF will use the GPU:", why)
+            return True
+    print("PySCF will use the CPU. Reason:", why)
+    return False
 
 
 def versions(prefix: str | None = None) -> dict:
