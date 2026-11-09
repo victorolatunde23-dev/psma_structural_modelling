@@ -47,3 +47,29 @@ def test_run_stage_reports_errors(tmp_path):
     res = md_env.run_stage("zinc", tmp_path / "outputs", repo=REPO, prefix=str(prefix),
                            extra=["--prepared", str(tmp_path / "missing.pdb")])
     assert res["returncode"] == 1
+
+
+def test_local_machine_defaults(tmp_path, monkeypatch):
+    import platform as pf
+    monkeypatch.delitem(sys.modules, "google.colab", raising=False)
+    monkeypatch.delenv("COLAB_RELEASE_TAG", raising=False)
+    monkeypatch.setenv("PSMA_MDENV", str(tmp_path / "env"))
+    assert not md_env.in_colab() and md_env.default_prefix() == str(tmp_path / "env")
+    monkeypatch.setattr(pf, "system", lambda: "Windows")
+    import pytest
+    with pytest.raises(RuntimeError, match="WSL2"):
+        md_env.mamba_platform()
+    monkeypatch.setattr(pf, "system", lambda: "Darwin")
+    monkeypatch.setattr(pf, "machine", lambda: "arm64")
+    assert md_env.mamba_platform() == "osx-arm64"
+
+
+def test_local_overrides(tmp_path):
+    from psma_pipeline.colab import local_overrides
+    import pytest
+    assert local_overrides(None) == {}
+    with pytest.raises(FileNotFoundError, match="outputs"):
+        local_overrides(tmp_path)
+    (tmp_path / "outputs").mkdir()
+    o = local_overrides(tmp_path)
+    assert o["paths"]["outputs"] == str(tmp_path / "outputs") and (tmp_path / "cache").is_dir()

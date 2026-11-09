@@ -51,3 +51,21 @@ def storage_overrides(use_drive: bool = True, folder: str = DEFAULT_DRIVE_FOLDER
     (base / "outputs").mkdir(parents=True, exist_ok=True)
     print(f"Results and downloads are stored on Google Drive: {base}")
     return {"paths": {"cache": str(base / "cache"), "outputs": str(base / "outputs")}}
+
+
+def local_overrides(folder: str | Path | None) -> dict:
+    """Configuration overrides for a run on your own machine.
+
+    ``folder`` is the shared project folder holding ``cache/`` and ``outputs/``, for example the
+    synced Google Drive folder (Google Drive for desktop), so local results land in the same place
+    as the Colab ones. ``None`` keeps the repository's own ``cache/`` and ``outputs/``.
+    """
+    if not folder:
+        return {}
+    base = Path(folder).expanduser()
+    if not (base / "outputs").exists():
+        raise FileNotFoundError(f"{base / 'outputs'} not found: point DATA_DIR at the folder that contains "
+                                "'outputs' (and 'cache') from the earlier notebooks")
+    (base / "cache").mkdir(parents=True, exist_ok=True)
+    print(f"Results and downloads: {base}")
+    return {"paths": {"cache": str(base / "cache"), "outputs": str(base / "outputs")}}

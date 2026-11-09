@@ -65,7 +65,7 @@ src/psma_pipeline/
 notebooks/    one notebook per stage (explanation + plots; no calculations)
 scripts/      run_survey.py, run_assessment.py, run_pockets.py, run_alphafold.py, run_preparation.py (command-line equivalents of notebooks 01–04)
 tests/        pytest suite (offline; gemmi tests skip without gemmi; network tests opt-in)
-docs/         PLAN.md, CHECKLIST.md, CHANGES.md, M4_ALPHAFOLD_MEMBRANE.md, M5_MODEL_PREPARATION.md, M6_ZINC_PARAMETERS.md, M6_SYSTEM_BUILD.md
+docs/         PLAN.md, CHECKLIST.md, CHANGES.md, M4_ALPHAFOLD_MEMBRANE.md, M5_MODEL_PREPARATION.md, M6_ZINC_PARAMETERS.md, M6_SYSTEM_BUILD.md, LOCAL_GPU.md
 data/ cache/ outputs/   (contents not tracked)
 ```
 

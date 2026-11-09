@@ -284,3 +284,13 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 
 - **The geometry optimisation now saves its geometry after every step** (`*.opt_checkpoint.npz` on Drive). A disconnected Colab run resumes from the last step instead of starting over.
 - **The reason PySCF is not on the GPU is reported:** `qm_bridge.gpu_status()`, shown in setup cell 0b ("PySCF on GPU"), the self-test and the QM summary. In the first Colab run the runtime had a GPU, but PySCF ran on the CPU (`gpu: false`).
+
+### Notebook 05 on your own GPU (v0.7.3)
+
+- **Notebook 05 runs on your own machine** (Linux, or Windows via WSL2, with an NVIDIA GPU), in Jupyter or with Colab connected to a local runtime. Guide: `docs/LOCAL_GPU.md`.
+- `md_env`:
+  - environment in `~/psma_mdenv` (or `PSMA_MDENV`), built once;
+  - micromamba for the right platform, or an existing conda/mamba;
+  - GPU packages only when `nvidia-smi` finds a card;
+  - a clear message on native Windows.
+- `colab.local_overrides(DATA_DIR)` points the run at the synced Google Drive folder, so the results land with the Colab ones.
