@@ -73,3 +73,20 @@ def test_local_overrides(tmp_path):
     (tmp_path / "outputs").mkdir()
     o = local_overrides(tmp_path)
     assert o["paths"]["outputs"] == str(tmp_path / "outputs") and (tmp_path / "cache").is_dir()
+
+
+def test_pymsmt_seminario_patch(tmp_path):
+    """The patched module's eig returns real eigenvalues, so MCPB.py's round() works with numpy 2."""
+    import numpy as np
+    d = tmp_path / "lib" / "python3.11" / "site-packages" / "pymsmt" / "mcpb"
+    d.mkdir(parents=True)
+    f = d / "gene_final_frcmod_file.py"
+    f.write_text("from numpy import average, array, dot, cross, std\nfrom numpy.linalg import eigvals, eig, norm\nimport math\n")
+    assert md_env.patch_pymsmt(str(tmp_path)) == [str(f)]
+    assert md_env.patch_pymsmt(str(tmp_path)) == [str(f)] and f.read_text().count(md_env.PYMSMT_PATCH_MARK) == 1
+    ns = {}
+    exec(f.read_text(), ns)
+    w, v = ns["eig"](np.array([[1.0, -2.0, 0.0], [2.0, 1.0, 0.0], [0.0, 0.0, 3.0]]))   # complex pair 1±2i
+    assert not np.iscomplexobj(w) and round(w[0], 1) in (1.0, 3.0)
+    w2, _ = ns["eig"](np.diag([1.0, 2.0, 3.0]))
+    assert sorted(w2) == [1.0, 2.0, 3.0]

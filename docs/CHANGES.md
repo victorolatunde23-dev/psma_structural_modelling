@@ -305,3 +305,9 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **New `md.mcpb.qm_opt: hydrogens` (default):** every heavy atom is frozen, and only the hydrogens are optimised. MCPB.py's r0/θ0 are therefore the 9S7U values; the QM supplies the force constants and charges. `qm_opt: full` restores the standard full optimisation.
 - The hydrogens-only run has its own cache and checkpoint names (`*.hopt.*`), so nothing from the earlier full optimisation is reused.
 - `QMSummary` now records the optimisation mode, the number of steps and the largest heavy-atom displacement (0). The `qm_minimum` note explains that imaginary frequencies are expected in this mode.
+
+### MCPB.py Seminario step with numpy 2 (v0.7.6)
+
+- **Bug (Colab run of 2026-11-10):** MCPB.py step 2 stopped with `TypeError: type numpy.complex128 doesn't define __round__`. The Seminario method diagonalises non-symmetric 3×3 interatomic Hessian blocks, and numpy can return complex eigenvalues with tiny imaginary parts; numpy ≥ 2 no longer rounds complex scalars.
+- **Fix:** setup patches pymsmt in the MD environment (`md_env.patch_pymsmt`, idempotent) so the Seminario `eig` keeps the real parts, as in the modified Seminario method. Any imaginary part above 1% of an eigenvalue is printed to `mcpb_step2.log`. Real-eigenvalue cases are unchanged.
+- All QM results (the hydrogens-only optimisation, Hessian and ESP) are cached, so the re-run goes straight to MCPB.py step 2.

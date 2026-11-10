@@ -88,6 +88,44 @@ def _sh(cmd: str, log: Path | None = None) -> None:
         raise RuntimeError(f"command failed ({r.returncode}): {cmd}")
 
 
+PYMSMT_PATCH_MARK = "# psma_pipeline: real-part Seminario eigenvalues"
+PYMSMT_PATCH = f"""
+{PYMSMT_PATCH_MARK}
+from numpy.linalg import eig as _np_eig
+import numpy as _np
+
+
+def eig(m):
+    # Seminario (MCPB.py) diagonalises the 3x3 interatomic Hessian blocks, which are not symmetric, so
+    # numpy can return complex eigenvalues with tiny imaginary parts. With numpy >= 2, round() on a complex
+    # scalar raises TypeError, so MCPB.py stops. Keep the real parts (as in the modified Seminario method);
+    # report any imaginary part above 1% of the eigenvalue so it stays visible in the log.
+    w, v = _np_eig(m)
+    if _np.iscomplexobj(w):
+        rel = float(_np.max(_np.abs(w.imag) / _np.maximum(_np.abs(w), 1e-12)))
+        if rel > 0.01:
+            print(f"[psma_pipeline] Seminario block with complex eigenvalues: max |imag|/|eig| = {{rel:.3f}}")
+        w, v = w.real, v.real
+    return w, v
+"""
+
+
+def patch_pymsmt(prefix: str | None = None) -> list[str]:
+    """Make MCPB.py's Seminario step work with numpy 2 (see PYMSMT_PATCH). Idempotent; returns patched files."""
+    done = []
+    for f in Path(prefix or ENV_PREFIX).glob("lib/python3*/site-packages/pymsmt/mcpb/gene_final_frcmod_file.py"):
+        t = f.read_text()
+        if PYMSMT_PATCH_MARK in t:
+            done.append(str(f))
+            continue
+        line = "from numpy.linalg import eigvals, eig, norm"
+        if line not in t:
+            raise RuntimeError(f"{f}: unexpected pymsmt version, cannot apply the Seminario patch")
+        f.write_text(t.replace(line, line + "\n" + PYMSMT_PATCH, 1))
+        done.append(str(f))
+    return done
+
+
 def install_env(repo: str | Path, prefix: str | None = None, gpu: bool = True, log: str | Path | None = None) -> dict:
     """Create the MD environment once (5–15 min) and install this repository into it.
     Works in Colab and on your own Linux / WSL2 / macOS machine; the GPU packages are added only
@@ -105,6 +143,7 @@ def install_env(repo: str | Path, prefix: str | None = None, gpu: bool = True, l
         _sh(f"'{mamba}' create -y -q -p '{prefix}' -c conda-forge {pk}", log)
     py = env_python(prefix)
     _sh(f"'{py}' -m pip install -q --no-deps -e '{repo}'", log)
+    patched = patch_pymsmt(prefix)
     card = nvidia_gpu()
     gpu_ok = False
     if gpu and card and plat.startswith("linux"):
@@ -113,7 +152,7 @@ def install_env(repo: str | Path, prefix: str | None = None, gpu: bool = True, l
         print("No NVIDIA GPU found (nvidia-smi): PySCF will use the CPU" if not card else
               "PySCF GPU support needs Linux or WSL2: PySCF will use the CPU")
     return {"machine": "Colab" if in_colab() else f"local ({plat})", "NVIDIA GPU": card, "prefix": prefix,
-            "python": str(py), "gpu4pyscf installed": gpu_ok, "install log": str(log), **versions(prefix)}
+            "python": str(py), "gpu4pyscf installed": gpu_ok, "MCPB.py Seminario patch": bool(patched), "install log": str(log), **versions(prefix)}
 
 
 def pyscf_gpu_status(py: str | Path) -> tuple[bool, str]:
