@@ -311,3 +311,10 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Bug (Colab run of 2026-11-10):** MCPB.py step 2 stopped with `TypeError: type numpy.complex128 doesn't define __round__`. The Seminario method diagonalises non-symmetric 3×3 interatomic Hessian blocks, and numpy can return complex eigenvalues with tiny imaginary parts; numpy ≥ 2 no longer rounds complex scalars.
 - **Fix:** setup patches pymsmt in the MD environment (`md_env.patch_pymsmt`, idempotent) so the Seminario `eig` keeps the real parts, as in the modified Seminario method. Any imaginary part above 1% of an eigenvalue is printed to `mcpb_step2.log`. Real-eigenvalue cases are unchanged.
 - All QM results (the hydrogens-only optimisation, Hessian and ESP) are cached, so the re-run goes straight to MCPB.py step 2.
+
+### packmol-memgen with numpy 2 (v0.7.7)
+
+- **Bug (Colab run of 2026-11-10):** packmol-memgen stopped with `AttributeError: module 'numpy' has no attribute 'float'`. AmberTools' conda build ships an older pdbremix that still uses aliases numpy 2 removed. The notebook then failed with a confusing `KeyError: 'SystemChecks'`.
+- **Fix:** setup adds a small shim to the MD environment (`md_env.numpy_compat`: `psma_numpy_compat.pth`). It re-adds the removed aliases (`np.float`, `np.int`, `np.float_`, `np.NaN`, `np.product`, …) for AmberTools' Python tools and changes nothing else.
+- Notebook 05 section F now stops with a clear message when the system build fails early, instead of the `KeyError` in section I.
+- The zinc stage completed in this run: all critical ZincChecks PASS, and r0 equals the crystal distances (within 0.001 Å). Glu425 OE1–Zn2 got a Seminario k of 0.0 kcal/mol/Å², to be reviewed before production.

@@ -110,6 +110,46 @@ def eig(m):
 """
 
 
+NUMPY_COMPAT = '''"""psma_pipeline: numpy 2 compatibility for AmberTools' Python tools in this environment.
+
+AmberTools' conda build ships older Python tools (packmol-memgen's pdbremix, parts of pymsmt) that still
+use aliases removed in numpy 2 (np.float, np.int, ...). Loaded at interpreter start by
+psma_numpy_compat.pth; it only re-adds the old names, so code that does not use them is unaffected.
+"""
+try:
+    import numpy as _np
+    _ALIASES = {"float": float, "int": int, "bool": bool, "complex": complex, "object": object, "str": str,
+                "long": int, "unicode": str, "float_": "float64", "complex_": "complex128", "int_": "int64",
+                "NaN": "nan", "NAN": "nan", "Inf": "inf", "Infinity": "inf", "infty": "inf", "PINF": "inf",
+                "NINF": None, "product": "prod", "cumproduct": "cumprod", "alltrue": "all", "sometrue": "any",
+                "round_": "round", "row_stack": "vstack", "trapz": "trapezoid", "in1d": "isin"}
+    for _name, _target in _ALIASES.items():
+        if _name in _np.__dict__:
+            continue
+        if _target is None:
+            setattr(_np, _name, -_np.inf)
+        elif isinstance(_target, str):
+            if hasattr(_np, _target):
+                setattr(_np, _name, getattr(_np, _target))
+        else:
+            setattr(_np, _name, _target)
+    if "asfarray" not in _np.__dict__:
+        _np.asfarray = lambda a, dtype=float: _np.asarray(a, dtype=dtype)
+except Exception:
+    pass
+'''
+
+
+def numpy_compat(prefix: str | None = None) -> list[str]:
+    """Install the numpy 2 alias shim into the MD environment's site-packages (idempotent)."""
+    done = []
+    for sp in Path(prefix or ENV_PREFIX).glob("lib/python3*/site-packages"):
+        (sp / "psma_numpy_compat.py").write_text(NUMPY_COMPAT)
+        (sp / "psma_numpy_compat.pth").write_text("import psma_numpy_compat\n")
+        done.append(str(sp))
+    return done
+
+
 def patch_pymsmt(prefix: str | None = None) -> list[str]:
     """Make MCPB.py's Seminario step work with numpy 2 (see PYMSMT_PATCH). Idempotent; returns patched files."""
     done = []
@@ -144,6 +184,7 @@ def install_env(repo: str | Path, prefix: str | None = None, gpu: bool = True, l
     py = env_python(prefix)
     _sh(f"'{py}' -m pip install -q --no-deps -e '{repo}'", log)
     patched = patch_pymsmt(prefix)
+    compat = numpy_compat(prefix)
     card = nvidia_gpu()
     gpu_ok = False
     if gpu and card and plat.startswith("linux"):
@@ -152,7 +193,7 @@ def install_env(repo: str | Path, prefix: str | None = None, gpu: bool = True, l
         print("No NVIDIA GPU found (nvidia-smi): PySCF will use the CPU" if not card else
               "PySCF GPU support needs Linux or WSL2: PySCF will use the CPU")
     return {"machine": "Colab" if in_colab() else f"local ({plat})", "NVIDIA GPU": card, "prefix": prefix,
-            "python": str(py), "gpu4pyscf installed": gpu_ok, "MCPB.py Seminario patch": bool(patched), "install log": str(log), **versions(prefix)}
+            "python": str(py), "gpu4pyscf installed": gpu_ok, "MCPB.py Seminario patch": bool(patched), "numpy 2 shim": bool(compat), "install log": str(log), **versions(prefix)}
 
 
 def pyscf_gpu_status(py: str | Path) -> tuple[bool, str]:

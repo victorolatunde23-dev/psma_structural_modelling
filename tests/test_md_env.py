@@ -90,3 +90,16 @@ def test_pymsmt_seminario_patch(tmp_path):
     assert not np.iscomplexobj(w) and round(w[0], 1) in (1.0, 3.0)
     w2, _ = ns["eig"](np.diag([1.0, 2.0, 3.0]))
     assert sorted(w2) == [1.0, 2.0, 3.0]
+
+
+def test_numpy_compat_shim(tmp_path):
+    """The shim re-adds aliases removed in numpy 2 (packmol-memgen's pdbremix uses np.float)."""
+    import subprocess
+    sp = tmp_path / "lib" / "python3.11" / "site-packages"
+    sp.mkdir(parents=True)
+    assert md_env.numpy_compat(str(tmp_path)) == [str(sp)]
+    code = ("import site, sys; site.addsitedir(sys.argv[1]); import numpy as np; "
+            "print(np.zeros(3, dtype=np.float).dtype, np.int is int, np.float_ is np.float64, np.NaN != np.NaN)")
+    r = subprocess.run([sys.executable, "-c", code, str(sp)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.split() == ["float64", "True", "True", "True"]
