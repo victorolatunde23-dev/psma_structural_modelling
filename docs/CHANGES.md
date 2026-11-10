@@ -318,3 +318,10 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Fix:** setup adds a small shim to the MD environment (`md_env.numpy_compat`: `psma_numpy_compat.pth`). It re-adds the removed aliases (`np.float`, `np.int`, `np.float_`, `np.NaN`, `np.product`, …) for AmberTools' Python tools and changes nothing else.
 - Notebook 05 section F now stops with a clear message when the system build fails early, instead of the `KeyError` in section I.
 - The zinc stage completed in this run: all critical ZincChecks PASS, and r0 equals the crystal distances (within 0.001 Å). Glu425 OE1–Zn2 got a Seminario k of 0.0 kcal/mol/Å², to be reviewed before production.
+
+### Membrane packing: faster, restart-safe, CPU runtime (v0.7.8)
+
+- **Run of 2026-11-10:** packmol-memgen on the ~523k-atom box (686 POPC, 294 CHL1, ~132k waters, 0.15 M NaCl; 161 × 161 × 204 Å) ran from 11:35 until the Colab session ended at 12:43, still in the per-type stage. It left a half-written `packed.pdb`.
+- **Never reuse an unfinished packing:** packmol-memgen now runs on the local disk. Its result is copied to Drive with a marker (`packed.done.json`) recording the settings and protein hash, and a `packed.pdb` without a matching marker is repacked.
+- **Faster:** `md.system.nloop_all: 30` (packmol-memgen default 100) and `movebadrandom: true`. Remaining overlaps are removed at the merge (whole molecules) and by minimisation.
+- **CPU runtime:** packing and the tleap build are CPU-only. Without a GPU, notebook 05 section F builds the system and skips OpenMM. Running the section again on a GPU runtime reuses the packing and only minimises and runs the test.

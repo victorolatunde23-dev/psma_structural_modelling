@@ -611,20 +611,45 @@ def run_system_build(cfg: Any, prepared_pdb: str | Path | None = None, zinc_dir:
           [prepared_pdb] + smap.files, [prot_pdb], {k: v for k, v in sol.info.items() if k not in ("zn_map", "xyz")})
 
     # ---- 2. membrane with packmol-memgen -------------------------------------------------------------------
-    packed = wd / "packed.pdb"
-    if not packed.exists():
+    # Packing runs on the local disk (fast; Drive is slow for a 40 MB file rewritten every loop) and is copied
+    # to the work folder only when packmol-memgen has finished. A marker records the settings, so a
+    # half-written file from an interrupted run, or a packing made with other settings, is never reused.
+    packed, marker = wd / "packed.pdb", wd / "packed.done.json"
+    pack_params = {k: s.get(k, d) for k, d in (("lipids", "POPC:CHL1"), ("ratio", "7:3"), ("dist", 15.0),
+                                               ("dist_wat", 17.5), ("salt_cation", "Na+"), ("salt_molar", 0.15),
+                                               ("nloop", 20), ("nloop_all", 30), ("movebadrandom", True))}
+    pack_params["protein_sha256"] = sha256_file(prot_pdb)
+    reuse = packed.exists() and marker.exists() and json.loads(marker.read_text()) == pack_params
+    if not reuse:
+        import tempfile
+        for f in (packed, marker):
+            if f.exists():
+                f.unlink()
+        tmp = Path(tempfile.mkdtemp(prefix="psma_pack_"))
+        shutil.copy2(prot_pdb, tmp / prot_pdb.name)
         cmd = ["packmol-memgen", "--pdb", prot_pdb.name, "--preoriented", "--notprotonate",
-               "--lipids", str(s.get("lipids", "POPC:CHL1")), "--ratio", str(s.get("ratio", "7:3")),
-               "--dist", str(s.get("dist", 15.0)), "--dist_wat", str(s.get("dist_wat", 17.5)),
-               "--salt", "--salt_c", str(s.get("salt_cation", "Na+")), "--saltcon", str(s.get("salt_molar", 0.15)),
-               "--output", packed.name, "--overwrite", "--noprogress"]
-        r = _run(cmd, wd, "packmol_memgen.log")
-        if not packed.exists():
+               "--lipids", str(pack_params["lipids"]), "--ratio", str(pack_params["ratio"]),
+               "--dist", str(pack_params["dist"]), "--dist_wat", str(pack_params["dist_wat"]),
+               "--salt", "--salt_c", str(pack_params["salt_cation"]), "--saltcon", str(pack_params["salt_molar"]),
+               "--nloop", str(pack_params["nloop"]), "--nloop_all", str(pack_params["nloop_all"]),
+               "--output", "packed.pdb", "--overwrite", "--noprogress"]
+        if pack_params["movebadrandom"]:
+            cmd.append("--movebadrandom")
+        log.info("packing the membrane in %s (this is the slowest step of part B)", tmp)
+        r = _run(cmd, tmp, "packmol_memgen.log")
+        for f in tmp.glob("*.log"):
+            shutil.copy2(f, wd / f.name)
+        if r.returncode != 0 or not (tmp / "packed.pdb").exists():
             issues.add("system", Status.FAIL, f"packmol-memgen failed: see {wd / 'packmol_memgen.log'}")
             return BuildResults(tables, issues, wd)
+        shutil.copy2(tmp / "packed.pdb", packed)
+        marker.write_text(json.dumps(pack_params, indent=1))
+        shutil.rmtree(tmp, ignore_errors=True)
+    else:
+        log.info("reusing the finished packing %s", packed)
     pk, cryst = read_pdb_molecules(packed)
     _step(prov, "membrane packing", "packmol-memgen (protein only, pre-oriented)", [prot_pdb], [packed],
-          {k: s.get(k) for k in ("lipids", "ratio", "dist", "dist_wat", "salt_cation", "salt_molar")})
+          {**pack_params, "reused": reuse})
 
     # ---- 3. merge and tleap -------------------------------------------------------------------------------------
     lines, comp, minfo = merge_with_membrane(sol, pk, cryst, float(s.get("clash_cutoff", 1.6)))
@@ -693,7 +718,7 @@ def system_checks(t: dict, lg: dict, md: pd.DataFrame | None, before: dict, afte
             add("lipid_ratio", Status.PASS if abs(cf - want) <= 0.05 else Status.WARNING,
                 f"cholesterol {cf:.2f} (requested {want:.2f}) after clash removal")
     if md is None:
-        add("minimisation_finite", Status.NOT_RUN, "OpenMM not run")
+        add("minimisation_finite", Status.NOT_RUN, "OpenMM not run (no GPU, or build only): run notebook 05 section F again on a GPU runtime; the packing is reused")
     else:
         mins = md[md["Stage"] == "minimised (unrestrained)"]
         fin = bool(md["Finite"].dropna().all())

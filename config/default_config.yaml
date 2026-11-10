@@ -475,6 +475,10 @@ md:                             # Milestone 6: system setup (notebook 05)
     salt_molar: 0.15
     dist: 15.0                  # Å, protein to box edge in x/y (packmol-memgen --dist)
     dist_wat: 17.5              # Å, water layer above/below the protein (--dist_wat)
+    nloop: 20                   # packmol GENCAN loops per molecule type (packmol-memgen default)
+    nloop_all: 30               # all-together loops (default 100 took hours for ~523k atoms); remaining overlaps
+                                # are removed at the merge (whole molecules) and by minimisation
+    movebadrandom: true         # re-place badly packed molecules randomly: faster convergence
     clash_cutoff: 1.6           # Å; whole lipid / water molecules closer than this to the solute are removed
     lipid_ff: lipid21
     glycan_ff: GLYCAM_06j-1

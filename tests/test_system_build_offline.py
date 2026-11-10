@@ -344,3 +344,18 @@ def test_atom_index(tmp_path):
                             SB.pdb_atom_line(3, "HETATM", "ZN", "ZN1", "", 2, (0, 0, 0), "Zn"),
                             "TER", SB.pdb_atom_line(4, "HETATM", "O", "WAT", "", 3, (0, 0, 0), "O")]))
     assert SB.atom_index(p) == {(1, "N"): 0, (1, "CA"): 1, (2, "ZN"): 2, (3, "O"): 3}
+
+
+def test_interrupted_packing_is_not_reused(cfg, tmp_path, fake_build_tools):
+    """A packed.pdb without the completion marker (an interrupted run) is repacked; a finished one is reused."""
+    pdb = prepared_with_glycan(tmp_path / "microstate_00_default.pdb")
+    zd = zinc_dir(tmp_path / "zinc")
+    wd = cfg.outputs_dir / "md_setup" / "system"
+    wd.mkdir(parents=True)
+    (wd / "packed.pdb").write_text("REMARK half-written by an interrupted packmol run\n")
+    res = SB.run_system_build(cfg, pdb, zd, IssueLog(), run_md=False)
+    assert res.tables["SystemChecks"].set_index("Check").loc["tleap_build", "Status"] == "PASS"
+    assert (wd / "packed.done.json").exists() and "half-written" not in (wd / "packed.pdb").read_text()
+    stamp = (wd / "packed.pdb").stat().st_mtime_ns
+    SB.run_system_build(cfg, pdb, zd, IssueLog(), run_md=False)
+    assert (wd / "packed.pdb").stat().st_mtime_ns == stamp                 # reused, not repacked
