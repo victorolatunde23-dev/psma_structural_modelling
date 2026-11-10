@@ -409,6 +409,17 @@ def composition_table(comp: pd.DataFrame, box: list[float] | None, lipids_req: s
 # ---------------------------------------------------------------------------
 # tleap
 # ---------------------------------------------------------------------------
+def box_from_packmol_log(path: str | Path) -> list[float] | None:
+    """Box edge lengths (Å) from packmol-memgen's log ("x_len = ...", "y_len", "z_len"), or None."""
+    p = Path(path)
+    if not p.exists():
+        return None
+    vals = {}
+    for k, v in re.findall(r"\b([xyz])_len\s*=\s*([-\d.]+)", p.read_text()):
+        vals[k] = float(v)                       # the last occurrence wins (the final packing)
+    return [vals[k] for k in "xyz"] if len(vals) == 3 else None
+
+
 def tleap_script(cfg: Any, smap: SiteMap, bonds: list[tuple], box: list[float] | None, pdb_name: str = "system.pdb",
                  out: str = "system") -> str:
     s = cfg.get("md.system", {}) or {}
@@ -420,7 +431,9 @@ def tleap_script(cfg: Any, smap: SiteMap, bonds: list[tuple], box: list[float] |
         lines.append(f"bond sys.{r1}.{a1} sys.{r2}.{a2}")
     if box:
         lines.append(f"set sys box {{ {box[0]:.3f} {box[1]:.3f} {box[2]:.3f} }}")
-    lines += ["charge sys", "addIonsRand sys Na+ 0", "addIonsRand sys Cl- 0", "charge sys", "check sys",
+    # no "check sys": on a ~500k-atom membrane system its close-contact search runs for hours; the metal site was
+    # checked in part A, missing parameters / unknown residues still show in the log, and clashes are minimised
+    lines += ["charge sys", "addIonsRand sys Na+ 0", "addIonsRand sys Cl- 0", "charge sys",
               f"saveamberparm sys {out}.prmtop {out}.inpcrd", f"savepdb sys {out}_tleap.pdb", "quit"]
     return "\n".join(lines) + "\n"
 
@@ -648,6 +661,15 @@ def run_system_build(cfg: Any, prepared_pdb: str | Path | None = None, zinc_dir:
     else:
         log.info("reusing the finished packing %s", packed)
     pk, cryst = read_pdb_molecules(packed)
+    box_source = "CRYST1 of the packed PDB"
+    if not cryst:                                # packmol-memgen's AMBER output has no CRYST1: use its box
+        cryst = box_from_packmol_log(wd / "packmol-memgen.log")
+        box_source = "packmol-memgen box (log)"
+    if not cryst:
+        X = pk[["x", "y", "z"]].to_numpy()
+        cryst = [round(float(v), 3) for v in (X.max(0) - X.min(0))]
+        box_source = "coordinate extent of the packed system"
+        issues.add("system", Status.WARNING, f"no box in the packed PDB or log: using the coordinate extent {cryst} Å")
     _step(prov, "membrane packing", "packmol-memgen (protein only, pre-oriented)", [prot_pdb], [packed],
           {**pack_params, "reused": reuse})
 
@@ -657,7 +679,7 @@ def run_system_build(cfg: Any, prepared_pdb: str | Path | None = None, zinc_dir:
     sys_pdb.write_text("\n".join(lines) + "\n")
     tables["Composition"] = composition_table(comp, cryst, str(s.get("lipids")), str(s.get("ratio")))
     tables["MergeSummary"] = pd.DataFrame([{"Item": k, "Value": v} for k, v in {
-        **minfo, "box (Å)": cryst, **{k: v for k, v in tables["Composition"].attrs.items() if k != "box (Å)"}}.items()])
+        **minfo, "box (Å)": cryst, "box source": box_source, **{k: v for k, v in tables["Composition"].attrs.items() if k != "box (Å)"}}.items()])
     leap = wd / "build.in"
     leap.write_text(tleap_script(cfg, smap, sol.bonds, cryst))
     _run(["tleap", "-f", leap.name], wd, "build.log")
@@ -700,7 +722,7 @@ def run_system_build(cfg: Any, prepared_pdb: str | Path | None = None, zinc_dir:
 
 def system_checks(t: dict, lg: dict, md: pd.DataFrame | None, before: dict, after: dict, cfg: Any,
                   critical=("originals_unchanged", "tleap_build", "neutral", "minimisation_finite",
-                            "minimised_forces", "zn_geometry_kept")) -> pd.DataFrame:
+                            "minimised_forces", "zn_geometry_kept", "periodic_box")) -> pd.DataFrame:
     oc = cfg.get("md.openmm", {}) or {}
     rows = []
     add = lambda c, st, d: rows.append({"Check": c, "Status": st.value, "Detail": d})  # noqa: E731
@@ -709,6 +731,11 @@ def system_checks(t: dict, lg: dict, md: pd.DataFrame | None, before: dict, afte
     ok = lg.get("errors") == 0 and not lg.get("missing parameters") and not lg.get("unknown")
     add("tleap_build", Status.PASS if ok else Status.FAIL,
         f"errors {lg.get('errors')}, missing parameters {len(lg.get('missing parameters') or [])}, unknown {len(lg.get('unknown') or [])}")
+    ms = t.get("MergeSummary")
+    box = ms.set_index("Item")["Value"].get("box (Å)") if ms is not None and len(ms) else None
+    okbox = isinstance(box, (list, tuple)) and len(box) == 3 and all(float(v) > 20 for v in box)
+    add("periodic_box", Status.PASS if okbox else Status.FAIL,
+        f"box {box} Å ({ms.set_index('Item')['Value'].get('box source')})" if okbox else "no periodic box: PME MD impossible")
     q = lg.get("charge after neutralising")
     add("neutral", Status.PASS if q is not None and abs(q) < 1e-3 else Status.FAIL, f"net charge {q}")
     comp = t.get("Composition", pd.DataFrame())
@@ -755,7 +782,8 @@ def md_readiness(t: dict, cfg: Any) -> pd.DataFrame:
     rows = []
     add = lambda item, st, d: rows.append({"Item": item, "Status": st.value, "Detail": d})  # noqa: E731
     ch = t.get("SystemChecks", pd.DataFrame()).set_index("Check") if "SystemChecks" in t else pd.DataFrame()
-    for c in ("tleap_build", "neutral", "minimisation_finite", "minimised_forces", "zn_geometry_kept", "smoke_run"):
+    for c in ("periodic_box", "tleap_build", "neutral", "minimisation_finite", "minimised_forces", "zn_geometry_kept",
+              "smoke_run"):
         if c in ch.index:
             st = Status(ch.loc[c, "Status"])
             if c == "smoke_run" and st == Status.NOT_RUN:      # needs a GPU; minimisation alone decides readiness

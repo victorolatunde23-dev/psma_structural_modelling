@@ -325,3 +325,10 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Never reuse an unfinished packing:** packmol-memgen now runs on the local disk. Its result is copied to Drive with a marker (`packed.done.json`) recording the settings and protein hash, and a `packed.pdb` without a matching marker is repacked.
 - **Faster:** `md.system.nloop_all: 30` (packmol-memgen default 100) and `movebadrandom: true`. Remaining overlaps are removed at the merge (whole molecules) and by minimisation.
 - **CPU runtime:** packing and the tleap build are CPU-only. Without a GPU, notebook 05 section F builds the system and skips OpenMM. Running the section again on a GPU runtime reuses the packing and only minimises and runs the test.
+
+### Periodic box and tleap on the full system (v0.7.9)
+
+- **Run of 2026-11-10 (CPU runtime):** the packing finished (17:06 → 20:20, nloop_all 30, about 3 h 15 min) and was saved with its completion marker. Then two bugs showed in `build.in`:
+  - **No periodic box.** packmol-memgen's AMBER-format output has no CRYST1, so no `set sys box` was written, and the prmtop would have been non-periodic, so PME MD would be impossible. The box now comes from the packed PDB's CRYST1, else from packmol-memgen's log (`x_len/y_len/z_len`: 161.0 × 161.0 × 203.7 Å), else from the coordinate extent with a WARNING. A new critical check, `periodic_box`, enforces it, and the box source is recorded in MergeSummary.
+  - **`check sys` removed** from the full-system tleap input: its close-contact search on ~520k atoms runs for hours. Missing parameters and unknown residues are still caught from the log.
+- packmol-memgen reported "Lipid piercing finder failed". Lipid tails threaded through cholesterol rings are not detected by the packer, so check them visually after minimisation.

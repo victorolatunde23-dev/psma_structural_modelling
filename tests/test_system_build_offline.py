@@ -327,6 +327,7 @@ def _md_frame(change=0.05, force=300.0, finite=True):
 def test_checks_and_readiness(cfg, md, expect):
     t = {"Composition": pd.DataFrame({"Component": ["lipid"]})}
     t["Composition"].attrs.update({"cholesterol fraction": 0.31, "requested cholesterol fraction": 0.3})
+    t["MergeSummary"] = pd.DataFrame({"Item": ["box (Å)", "box source"], "Value": [[160.0, 160.0, 200.0], "log"]})
     lg = {"errors": 0, "missing parameters": [], "unknown": [], "charge after neutralising": 0.0}
     t["SystemChecks"] = SB.system_checks(t, lg, md, {"a": "1"}, {"a": "1"}, cfg)
     c = t["SystemChecks"].set_index("Check")
@@ -359,3 +360,24 @@ def test_interrupted_packing_is_not_reused(cfg, tmp_path, fake_build_tools):
     stamp = (wd / "packed.pdb").stat().st_mtime_ns
     SB.run_system_build(cfg, pdb, zd, IssueLog(), run_md=False)
     assert (wd / "packed.pdb").stat().st_mtime_ns == stamp                 # reused, not repacked
+
+
+def test_box_from_packmol_log(tmp_path):
+    log = tmp_path / "packmol-memgen.log"
+    log.write_text(" Box information:\n x_len = 160.97685729441633\n\n y_len = 160.97685729441633\n z_len = 203.69\n")
+    assert SB.box_from_packmol_log(log) == [160.97685729441633, 160.97685729441633, 203.69]
+    assert SB.box_from_packmol_log(tmp_path / "missing.log") is None
+
+
+def test_no_cryst1_uses_packmol_box(cfg, tmp_path, fake_build_tools, monkeypatch):
+    """packmol-memgen's AMBER output has no CRYST1: the box must come from its log, never be left unset."""
+    real = SB.read_pdb_molecules
+    monkeypatch.setattr(SB, "read_pdb_molecules", lambda p: (real(p)[0], None))
+    wd = cfg.outputs_dir / "md_setup" / "system"
+    wd.mkdir(parents=True)
+    (wd / "packmol-memgen.log").write_text(" x_len = 90.0\n y_len = 90.0\n z_len = 100.0\n")
+    res = SB.run_system_build(cfg, prepared_with_glycan(tmp_path / "p.pdb"), zinc_dir(tmp_path / "z"), IssueLog(), run_md=False)
+    assert "set sys box { 90.000 90.000 100.000 }" in (res.workdir / "build.in").read_text()
+    assert "check sys" not in (res.workdir / "build.in").read_text()
+    c = res.tables["SystemChecks"].set_index("Check")
+    assert c.loc["periodic_box", "Status"] == "PASS" and "log" in c.loc["periodic_box", "Detail"]
