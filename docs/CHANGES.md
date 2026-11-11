@@ -332,3 +332,9 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
   - **No periodic box.** packmol-memgen's AMBER-format output has no CRYST1, so no `set sys box` was written, and the prmtop would have been non-periodic, so PME MD would be impossible. The box now comes from the packed PDB's CRYST1, else from packmol-memgen's log (`x_len/y_len/z_len`: 161.0 × 161.0 × 203.7 Å), else from the coordinate extent with a WARNING. A new critical check, `periodic_box`, enforces it, and the box source is recorded in MergeSummary.
   - **`check sys` removed** from the full-system tleap input: its close-contact search on ~520k atoms runs for hours. Missing parameters and unknown residues are still caught from the log.
 - packmol-memgen reported "Lipid piercing finder failed". Lipid tails threaded through cholesterol rings are not detected by the packer, so check them visually after minimisation.
+
+### GAFF for the hydroxide in the full-system build (v0.7.10)
+
+- **Run of 2026-11-10 (CPU):** the packing was reused, and the tleap build of the full system ran with a periodic box. It loaded 522,777 atoms, added 11,825 hydrogens, and neutralised the +8 net charge with 8 Cl⁻ (final charge 0.000004). It then stopped with 2 errors: no vdW parameters for type `ho`, the hydroxide H of OX1 on both chains. MCPB.py's own tleap input sources `leaprc.gaff` for the GAFF-typed hydroxide, but the system build only copied its atom types, mol2 and frcmod lines.
+- **Fix:** `site_map` now also carries `source leaprc.gaff`/`gaff2` from MCPB.py's input. If that line is missing and the hydroxide template is used, `tleap_script` adds it (version from `md.mcpb.gaff`).
+- The "one sided connection" warnings for the MCPB.py residues (HD1, AP1, GU1, AP2, HD2) are expected: their peptide links are made by the explicit `bond` commands.

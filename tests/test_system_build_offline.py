@@ -381,3 +381,17 @@ def test_no_cryst1_uses_packmol_box(cfg, tmp_path, fake_build_tools, monkeypatch
     assert "check sys" not in (res.workdir / "build.in").read_text()
     c = res.tables["SystemChecks"].set_index("Check")
     assert c.loc["periodic_box", "Status"] == "PASS" and "log" in c.loc["periodic_box", "Detail"]
+
+
+def test_gaff_loaded_for_hydroxide(cfg, tmp_path):
+    """The hydroxide uses GAFF types (ho/oh): without leaprc.gaff tleap cannot find their vdW parameters."""
+    zd = zinc_dir(tmp_path / "z")
+    (zd / "OHX.frcmod").write_text("remark\nMASS\n\nBOND\noh-ho 563.5 0.973\n")
+    sm = SB.site_map(zd)
+    sm.files.append(zd / "OHX.frcmod")
+    lines = SB.tleap_script(cfg, sm, [], [90.0, 90.0, 100.0]).splitlines()
+    assert "source leaprc.gaff" in lines and lines.index("source leaprc.gaff") < lines.index("sys = loadpdb system.pdb")
+    t = (zd / "PSMA_tleap.in").read_text().replace("source leaprc.water.tip3p", "source leaprc.water.tip3p\nsource leaprc.gaff2")
+    (zd / "PSMA_tleap.in").write_text(t)
+    lines = SB.tleap_script(cfg, SB.site_map(zd), [], None).splitlines()
+    assert lines.count("source leaprc.gaff2") == 1 and "source leaprc.gaff" not in lines

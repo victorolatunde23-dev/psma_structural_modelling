@@ -142,7 +142,9 @@ def site_map(zinc_dir: str | Path, group: str = "PSMA") -> SiteMap:
             if st == "}":
                 in_types = False
             continue
-        if re.match(r"\S+\s*=\s*loadmol2\s+\S+", st) or st.lower().startswith(("loadamberparams", "loadoff")):
+        if re.match(r"source\s+leaprc\.gaff2?\b", st):          # MCPB.py loads GAFF for non-standard residues
+            header.append(st)                                   # (the hydroxide's oh/ho types)
+        elif re.match(r"\S+\s*=\s*loadmol2\s+\S+", st) or st.lower().startswith(("loadamberparams", "loadoff")):
             header.append(st)
     def ref(n: int):
         if n in zn_nums:
@@ -425,6 +427,10 @@ def tleap_script(cfg: Any, smap: SiteMap, bonds: list[tuple], box: list[float] |
     s = cfg.get("md.system", {}) or {}
     lines = [f"source leaprc.protein.{cfg.get('md.protein_ff', 'ff14SB')}", f"source leaprc.{s.get('lipid_ff', 'lipid21')}",
              f"source leaprc.{s.get('glycan_ff', 'GLYCAM_06j-1')}", f"source leaprc.water.{cfg.get('md.water_model', 'tip3p')}"]
+    if not any(re.match(r"source\s+leaprc\.gaff", h.strip()) for h in smap.header) and \
+            any(f.name.upper().startswith("OHX") for f in smap.files):
+        # the hydroxide template uses GAFF types (oh/ho; OHX.frcmod from parmchk2 only adds what GAFF lacks)
+        lines.append("source leaprc.gaff2" if int(cfg.get("md.mcpb.gaff", 1)) == 2 else "source leaprc.gaff")
     lines += smap.header
     lines.append(f"sys = loadpdb {pdb_name}")
     for r1, a1, r2, a2 in bonds:
