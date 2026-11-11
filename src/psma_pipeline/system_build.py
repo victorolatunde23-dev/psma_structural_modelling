@@ -336,8 +336,44 @@ def protein_only_pdb(sol: Solute, path: Path) -> Path:
 # ---------------------------------------------------------------------------
 # Merge solute with the packed membrane
 # ---------------------------------------------------------------------------
-def merge_with_membrane(sol: Solute, packed: pd.DataFrame, cryst: list[float] | None, clash: float = 1.6
-                        ) -> tuple[list[str], pd.DataFrame, dict]:
+KIND_PRIORITY = {"water": 0, "ion": 1, "other": 2, "lipid": 3}   # which molecule of an overlapping pair is removed
+
+
+def _mol_kind(names) -> str:
+    names = set(names)
+    return ("lipid" if names & (LIPID_TAILS | LIPID_HEADS | STEROLS) else "water" if names == {"WAT"}
+            else "ion" if names <= IONS else "other")
+
+
+def environment_overlaps(env: pd.DataFrame, any_cut: float = 0.9, heavy_cut: float = 1.5) -> set:
+    """Molecules to remove so no two environment molecules overlap (any atoms < any_cut Å, heavy atoms <
+    heavy_cut Å). Of each overlapping pair the water (then ion, then lipid) is removed; between two of the same
+    kind, the later one. Such overlaps make the first minimisation steps blow up (NaN coordinates)."""
+    from scipy.spatial import cKDTree
+
+    if not len(env):
+        return set()
+    kind = {m: _mol_kind(g) for m, g in env.groupby("mol")["resname"]}
+    mol = env["mol"].to_numpy()
+    remove: set = set()
+    for sub, cut in ((env, any_cut), (env[env["element"] != "H"], heavy_cut)):
+        if len(sub) < 2:
+            continue
+        X = sub[["x", "y", "z"]].to_numpy()
+        m = sub["mol"].to_numpy()
+        pairs = cKDTree(X).query_pairs(cut, output_type="ndarray")
+        for i, j in pairs:
+            a, b = m[i], m[j]
+            if a == b or a in remove or b in remove:
+                continue
+            ka, kb = KIND_PRIORITY[kind[a]], KIND_PRIORITY[kind[b]]
+            remove.add(a if (ka, -a) < (kb, -b) else b)
+    del mol
+    return remove
+
+
+def merge_with_membrane(sol: Solute, packed: pd.DataFrame, cryst: list[float] | None, clash: float = 2.0,
+                        clash_h: float = 1.3) -> tuple[list[str], pd.DataFrame, dict]:
     """Superpose the solute on the packed protein, drop whole clashing molecules, return PDB lines and composition."""
     from scipy.spatial import cKDTree
 
@@ -363,17 +399,25 @@ def merge_with_membrane(sol: Solute, packed: pd.DataFrame, cryst: list[float] | 
     tree = cKDTree(np.array(solute_xyz))
     env = packed[~packed["resname"].isin(PROTEIN)]
     heavy = env[env["element"] != "H"]
+    hyd = env[env["element"] == "H"]
     d, _ = tree.query(heavy[["x", "y", "z"]].to_numpy(), k=1) if len(heavy) else (np.array([]), None)
     bad_mols = set(heavy.loc[d < clash, "mol"]) if len(heavy) else set()
+    # environment hydrogens pointing into the solute (heavy-atom solute; tleap adds its H later)
+    dh, _ = tree.query(hyd[["x", "y", "z"]].to_numpy(), k=1) if len(hyd) else (np.array([]), None)
+    bad_mols |= set(hyd.loc[dh < clash_h, "mol"]) if len(hyd) else set()
+    n_solute = len(bad_mols)
+    # overlaps between environment molecules left by an imperfect packing (packmol tolerance not reached)
+    overlap = environment_overlaps(env[~env["mol"].isin(bad_mols)])
+    bad_mols |= overlap
     comp = []
     first_seq = int(sol.residues["seq"].max())
     seq = first_seq
     serial = sum(1 for l in out if l.startswith(("ATOM", "HETATM"))) + 1
     for mol, g in env.groupby("mol", sort=False):
         names = list(dict.fromkeys(g["resname"]))
-        kind = ("lipid" if set(names) & (LIPID_TAILS | LIPID_HEADS | STEROLS) else
-                "water" if names == ["WAT"] else "ion" if set(names) <= IONS else "other")
-        comp.append({"mol": mol, "kind": kind, "residues": "+".join(names), "removed": mol in bad_mols})
+        kind = _mol_kind(names)
+        comp.append({"mol": mol, "kind": kind, "residues": "+".join(names), "removed": mol in bad_mols,
+                     "overlap": mol in overlap})
         if mol in bad_mols:
             continue
         for (rn, num, ch), r in g.groupby(["resname", "resnum", "chain"], sort=False):
@@ -387,7 +431,8 @@ def merge_with_membrane(sol: Solute, packed: pd.DataFrame, cryst: list[float] | 
         out.insert(0, f"CRYST1{cryst[0]:9.3f}{cryst[1]:9.3f}{cryst[2]:9.3f}  90.00  90.00  90.00 P 1           1")
     out.append("END")
     comp = pd.DataFrame(comp)
-    return out, comp, {"superposition RMSD (Å)": round(rmsd_fit, 3), "molecules removed": len(bad_mols)}
+    return out, comp, {"superposition RMSD (Å)": round(rmsd_fit, 3), "molecules removed": len(bad_mols),
+                       "removed: touching the protein": n_solute, "removed: overlapping other molecules": len(overlap)}
 
 
 def composition_table(comp: pd.DataFrame, box: list[float] | None, lipids_req: str, ratio_req: str) -> pd.DataFrame:
@@ -518,6 +563,58 @@ def make_simulation(topology, system, integrator_factory, positions, box=None):
     raise RuntimeError("no OpenMM platform could run this system: " + "; ".join(failures))
 
 
+def force_report(topology, forces_nm: np.ndarray, n: int = 15) -> pd.DataFrame:
+    """The n atoms with the largest forces: where a freshly built system is strained (clashes, piercings)."""
+    f = np.linalg.norm(forces_nm, axis=1)
+    f = np.where(np.isfinite(f), f, np.inf)
+    idx = np.argsort(-f)[:n]
+    atoms = list(topology.atoms())
+    rows = []
+    for i in idx:
+        a = atoms[int(i)]
+        rn = a.residue.name
+        kind = ("protein" if rn in PROTEIN or rn in ("NLN",) else "water" if rn in ("WAT", "HOH")
+                else "ion" if rn in IONS or rn in ("CA",) else "lipid" if rn in LIPID_TAILS | LIPID_HEADS | STEROLS
+                else "metal site / glycan / other")
+        rows.append({"Atom index": int(i), "Residue": rn, "Residue number (tleap)": a.residue.index + 1,
+                     "Atom": a.name, "Kind": kind, "Force (kJ/mol/nm)": float(f[i])})
+    return pd.DataFrame(rows)
+
+
+def cpu_prerelax(system, topology, positions, box, out: Path, threshold: float = 1e5, iterations: int = 200,
+                 rounds: int = 5):
+    """Relax the worst overlaps on the CPU (double precision) before minimising on the GPU.
+
+    A freshly packed system can contain atoms so close that the first GPU minimisation steps overflow
+    (``Particle coordinate is NaN``). The CPU platform does not overflow; a few hundred steps there bring
+    the largest force down, then the GPU takes over. Writes ``start_forces.csv`` (the most strained atoms)."""
+    import openmm as mm
+    import openmm.unit as u
+
+    ctx = mm.Context(system, mm.VerletIntegrator(0.001 * u.picoseconds), mm.Platform.getPlatformByName("CPU"))
+    ctx.setPositions(positions)
+    if box is not None:
+        ctx.setPeriodicBoxVectors(*box)
+
+    def maxf():
+        st = ctx.getState(getForces=True)
+        F = st.getForces(asNumpy=True).value_in_unit(u.kilojoule_per_mole / u.nanometer)
+        return F, float(np.nanmax(np.linalg.norm(F, axis=1)))
+
+    F, f0 = maxf()
+    report = force_report(topology, F)
+    report.to_csv(out / "start_forces.csv", index=False)
+    done, f = 0, f0
+    while f > threshold and done < rounds:
+        mm.LocalEnergyMinimizer.minimize(ctx, 10.0 * u.kilojoule_per_mole / u.nanometer, iterations)
+        done += 1
+        _, f = maxf()
+        log.info("CPU pre-relaxation round %d: max force %.3g kJ/mol/nm", done, f)
+    pos = ctx.getState(getPositions=True).getPositions()
+    return pos, report, {"max force at start (kJ/mol/nm)": f0, "CPU pre-relaxation rounds": done,
+                         "max force after CPU pre-relaxation (kJ/mol/nm)": f}
+
+
 def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, int]], out: Path,
                protein_heavy_idx: list[int]) -> tuple[pd.DataFrame, dict]:
     """Restrained + unrestrained minimisation and an optional restrained NVT/NPT smoke run."""
@@ -539,9 +636,12 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
     for i in protein_heavy_idx:
         rest.addParticle(i, pos[i].tolist())
     system.addForce(rest)
+    start_pos, start_report, pre = cpu_prerelax(
+        system, prm.topology, crd.positions, crd.boxVectors, out, float(oc.get("prerelax_max_force", 1e5)),
+        int(oc.get("prerelax_iterations", 100)), int(oc.get("prerelax_rounds", 5)))
     sim, integ, platform_name, platform_failures = make_simulation(
         prm.topology, system, lambda: mm.LangevinMiddleIntegrator(T * u.kelvin, 1 / u.picosecond, 0.002 * u.picoseconds),
-        crd.positions, crd.boxVectors)
+        start_pos, crd.boxVectors)
     rows = []
 
     def snap(stage):
@@ -599,7 +699,7 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
     d0 = rows[0]["_d"]
     df["Max Zn–ligand change (Å)"] = [round(float(np.max(np.abs(r["_d"] - d0))), 3) if isinstance(r.get("_d"), np.ndarray)
                                        and len(r["_d"]) == len(d0) and len(d0) else None for r in rows]
-    return df.drop(columns=["_d"]), {"platform": platform_name, "atoms": system.getNumParticles(),
+    return df.drop(columns=["_d"]), {"platform": platform_name, "atoms": system.getNumParticles(), **pre,
                                      "platforms that failed": "; ".join(platform_failures) or "none"}
 
 
@@ -710,7 +810,7 @@ def run_system_build(cfg: Any, prepared_pdb: str | Path | None = None, zinc_dir:
           {**pack_params, "reused": reuse})
 
     # ---- 3. merge and tleap -------------------------------------------------------------------------------------
-    lines, comp, minfo = merge_with_membrane(sol, pk, cryst, float(s.get("clash_cutoff", 1.6)))
+    lines, comp, minfo = merge_with_membrane(sol, pk, cryst, float(s.get("clash_cutoff", 2.0)), float(s.get("clash_cutoff_h", 1.3)))
     sys_pdb = wd / "system.pdb"
     sys_pdb.write_text("\n".join(lines) + "\n")
     tables["Composition"] = composition_table(comp, cryst, str(s.get("lipids")), str(s.get("ratio")))
@@ -759,6 +859,8 @@ def run_system_build(cfg: Any, prepared_pdb: str | Path | None = None, zinc_dir:
             issues.add("system", Status.NOT_RUN, "OpenMM not installed: minimisation NOT RUN")
         except Exception as ex:  # noqa: BLE001
             issues.add("system", Status.FAIL, f"OpenMM minimisation failed: {ex}")
+        if (wd / "start_forces.csv").exists():                 # the most strained atoms, also when it failed
+            tables["StartForces"] = pd.read_csv(wd / "start_forces.csv")
     after = {p: sha256_file(Path(p)) for p in originals}
     tables["SystemChecks"] = system_checks(tables, lg, md, originals, after, cfg)
     tables["MDReadiness"] = md_readiness(tables, cfg)

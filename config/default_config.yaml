@@ -479,7 +479,8 @@ md:                             # Milestone 6: system setup (notebook 05)
     nloop_all: 30               # all-together loops (default 100 took hours for ~523k atoms); remaining overlaps
                                 # are removed at the merge (whole molecules) and by minimisation
     movebadrandom: true         # re-place badly packed molecules randomly: faster convergence
-    clash_cutoff: 1.6           # Å; whole lipid / water molecules closer than this to the solute are removed
+    clash_cutoff: 2.0              # Å, environment heavy atom – protein heavy atom (whole molecule removed; was 1.6)
+    clash_cutoff_h: 1.3            # Å, environment H – protein heavy atom (the protein's own H are added by tleap later)
     lipid_ff: lipid21
     glycan_ff: GLYCAM_06j-1
   openmm:                       # minimisation and smoke test (OpenMM, Colab GPU)
@@ -487,6 +488,9 @@ md:                             # Milestone 6: system setup (notebook 05)
     restraint_kcal: 10.0        # kcal/mol/Å² on protein heavy atoms in the restrained stages
     min_tolerance: 10.0         # kJ/mol/nm
     max_force_ok: 1000.0        # kJ/mol/nm; largest force after minimisation
+    prerelax_max_force: 1.0e+5     # kJ/mol/nm; relax on the CPU (double precision) until below, then GPU
+    prerelax_iterations: 100      # per CPU round (~5–10 min each for ~535k atoms on 2 CPU cores)
+    prerelax_rounds: 5
     zn_bond_max_change: 0.3     # Å; Zn–ligand distance change allowed through minimisation / smoke run
     smoke_ps: [20, 20]          # restrained NVT heating to 310 K, then restrained NPT (membrane barostat); [] = skip
     temperature_k: 310

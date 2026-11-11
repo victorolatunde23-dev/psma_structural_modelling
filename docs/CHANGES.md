@@ -353,3 +353,16 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
   - `md_env` pins `cuda-version` to the driver's CUDA version (from `nvidia-smi`), in new and existing environments.
   - `make_simulation` tries each platform until one can actually create a context and evaluate the energy (CUDA → OpenCL → CPU), and records the platforms that failed.
   - The tleap build (~15 min here) is reused when its exact inputs are unchanged (`build.done.json`).
+
+### Minimisation NaN: overlaps and CPU pre-relaxation (v0.7.12)
+
+- **Run of 2026-11-11 (T4, 36 min):** the build passed again, but minimisation failed with `Particle coordinate is NaN`. In a freshly packed system, a few nearly coincident atoms make the first GPU steps overflow. Two likely sources, both not caught before:
+  - **Environment hydrogens pointing into the protein:** the clash test used heavy atoms only, and the protein's own H are added later by tleap.
+  - **Overlaps between environment molecules:** packmol stopped at 30 all-together loops, with residual violations.
+- **Merge:**
+  - environment heavy atom – protein heavy atom cut-off raised from 1.6 to **2.0 Å**;
+  - new environment H – protein heavy atom cut-off of **1.3 Å**;
+  - new `environment_overlaps`: of any two environment molecules with atoms < 0.9 Å apart (heavy atoms < 1.5 Å), the water is removed first, then the ion, then the lipid.
+  - MergeSummary now reports the removals by cause.
+- **OpenMM:** `cpu_prerelax` relaxes on the CPU platform (double precision) in rounds of 100 steps until the largest force is below 10⁵ kJ/mol/nm, then the GPU minimises as before.
+- **New table StartForces (`start_forces.csv`):** the 15 most strained atoms before any minimisation (residue, atom, kind, force). It is written even when minimisation fails, so a remaining problem (for example a lipid tail through a cholesterol ring) can be located.

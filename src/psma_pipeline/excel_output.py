@@ -641,6 +641,11 @@ _DICT: list[tuple[str, str, str, str, str]] = [
     ("Minimisation", r"Max Zn–ligand change \(Å\)", "Largest change of a Zn–ligand distance from the start", "Å", ""),
     ("Minimisation", r"Temperature \(K\)", "Instantaneous temperature at the end of the stage", "K", ""),
     ("Minimisation", r"Box \(Å\)", "Periodic box edge lengths", "Å", ""),
+    ("StartForces", r"Atom index", "0-based atom index in system.prmtop", "", ""),
+    ("StartForces", r"Residue|Atom", "Residue / atom name in the built system", "", ""),
+    ("StartForces", r"Residue number \(tleap\)", "Sequential residue number in system.prmtop", "", "sequential"),
+    ("StartForces", r"Kind", "protein / lipid / water / ion / metal site, glycan or other", "", ""),
+    ("StartForces", r"Force \(kJ/mol/nm\)", "Force on the atom in the built system before any minimisation", "kJ/mol/nm", ""),
     ("MDReadiness", r"Item", "Item between the built system and equilibration (OVERALL: READY if nothing FAILs)", "", ""),
     ("MDReadiness", r"Detail", "Finding, assumption or the check that failed", "", ""),
     # ---- run-level sheets ------------------------------------------------------------------------

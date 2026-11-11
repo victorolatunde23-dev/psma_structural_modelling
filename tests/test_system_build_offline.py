@@ -447,3 +447,16 @@ def test_tleap_build_reused_when_inputs_unchanged(cfg, tmp_path, fake_build_tool
     assert (wd / "build.done.json").exists()
     SB.run_system_build(cfg, pdb, zd, IssueLog(), run_md=False)
     assert (wd / "system.prmtop").stat().st_mtime_ns == stamp
+
+
+def test_environment_overlaps_remove_water_first():
+    rows = []
+    def add(mol, rn, atom, el, xyz):
+        rows.append({"mol": mol, "resname": rn, "atom": atom, "element": el, "x": xyz[0], "y": xyz[1], "z": xyz[2]})
+    add(0, "PA", "C1", "C", (0, 0, 0)); add(0, "PC", "P", "P", (1.5, 0, 0)); add(0, "OL", "C2", "C", (3, 0, 0))
+    add(1, "WAT", "O", "O", (0.5, 0.5, 0))                 # water inside a lipid -> water removed
+    add(2, "WAT", "O", "O", (10, 0, 0)); add(3, "WAT", "O", "O", (10.6, 0, 0))   # two waters -> the later one
+    add(4, "CHL", "C1", "C", (20, 0, 0)); add(5, "PA", "C1", "C", (20.5, 0, 0)); add(5, "PC", "P", "P", (22, 0, 0))
+    add(6, "WAT", "O", "O", (40, 0, 0))                    # isolated: kept
+    rem = SB.environment_overlaps(pd.DataFrame(rows))
+    assert rem == {1, 3, 5}
