@@ -338,3 +338,18 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Run of 2026-11-10 (CPU):** the packing was reused, and the tleap build of the full system ran with a periodic box. It loaded 522,777 atoms, added 11,825 hydrogens, and neutralised the +8 net charge with 8 Cl⁻ (final charge 0.000004). It then stopped with 2 errors: no vdW parameters for type `ho`, the hydroxide H of OX1 on both chains. MCPB.py's own tleap input sources `leaprc.gaff` for the GAFF-typed hydroxide, but the system build only copied its atom types, mol2 and frcmod lines.
 - **Fix:** `site_map` now also carries `source leaprc.gaff`/`gaff2` from MCPB.py's input. If that line is missing and the hydroxide template is used, `tleap_script` adds it (version from `md.mcpb.gaff`).
 - The "one sided connection" warnings for the MCPB.py residues (HD1, AP1, GU1, AP2, HD2) are expected: their peptide links are made by the explicit `bond` commands.
+
+### First full system build; OpenMM on the T4 (v0.7.11)
+
+- **Run of 2026-11-11 (T4):** the system build PASSED every build check:
+  - tleap 0 errors, no missing parameters or unknown residues;
+  - periodic box 161.0 × 161.0 × 203.7 Å;
+  - net charge +8 neutralised with 8 Cl⁻;
+  - cholesterol fraction 0.301 (requested 0.30);
+  - 684 POPC + 294 CHL1 (2 lipids and 4 waters removed for clashes), 132,170 waters, 356 Na⁺ / 353 Cl⁻;
+  - `system.prmtop` 122 MB.
+- **OpenMM then failed:** `CUDA_ERROR_UNSUPPORTED_PTX_VERSION (222)`. The CUDA toolkit installed in the MD environment (NVRTC, which OpenMM uses to compile its GPU kernels) was newer than the T4 runtime's driver.
+- **Fixes:**
+  - `md_env` pins `cuda-version` to the driver's CUDA version (from `nvidia-smi`), in new and existing environments.
+  - `make_simulation` tries each platform until one can actually create a context and evaluate the energy (CUDA → OpenCL → CPU), and records the platforms that failed.
+  - The tleap build (~15 min here) is reused when its exact inputs are unchanged (`build.done.json`).

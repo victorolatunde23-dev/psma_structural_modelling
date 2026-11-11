@@ -476,14 +476,46 @@ def distances(xyz_nm: np.ndarray, pairs: list[tuple[int, int]]) -> np.ndarray:
     return np.array([10.0 * np.linalg.norm(xyz_nm[i] - xyz_nm[j]) for i, j in pairs])
 
 
+PLATFORMS = (("CUDA", {"Precision": "mixed"}), ("OpenCL", {"Precision": "mixed"}), ("CPU", {}))
+
+
 def pick_platform():
     import openmm as mm
-    for name, props in (("CUDA", {"Precision": "mixed"}), ("OpenCL", {"Precision": "mixed"}), ("CPU", {})):
+    for name, props in PLATFORMS:
         try:
             return mm.Platform.getPlatformByName(name), props
         except Exception:  # noqa: BLE001
             continue
     raise RuntimeError("no OpenMM platform available")
+
+
+def make_simulation(topology, system, integrator_factory, positions, box=None):
+    """Simulation on the first platform that can actually create a context and evaluate the energy.
+
+    A platform can be listed yet fail on first use (e.g. CUDA_ERROR_UNSUPPORTED_PTX_VERSION when the CUDA
+    toolkit in the environment is newer than the GPU driver). Falls back CUDA -> OpenCL -> CPU and returns
+    (simulation, integrator, platform name, [failures])."""
+    import openmm as mm
+    import openmm.app as app
+
+    failures = []
+    for name, props in PLATFORMS:
+        try:
+            platform = mm.Platform.getPlatformByName(name)
+        except Exception:  # noqa: BLE001
+            continue
+        integ = integrator_factory()
+        try:
+            sim = app.Simulation(topology, system, integ, platform, props)
+            sim.context.setPositions(positions)
+            if box is not None:
+                sim.context.setPeriodicBoxVectors(*box)
+            sim.context.getState(getEnergy=True)
+            return sim, integ, name, failures
+        except Exception as ex:  # noqa: BLE001
+            failures.append(f"{name}: {ex}")
+            log.warning("OpenMM platform %s failed (%s); trying the next one", name, ex)
+    raise RuntimeError("no OpenMM platform could run this system: " + "; ".join(failures))
 
 
 def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, int]], out: Path,
@@ -507,12 +539,9 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
     for i in protein_heavy_idx:
         rest.addParticle(i, pos[i].tolist())
     system.addForce(rest)
-    platform, props = pick_platform()
-    integ = mm.LangevinMiddleIntegrator(T * u.kelvin, 1 / u.picosecond, 0.002 * u.picoseconds)
-    sim = app.Simulation(prm.topology, system, integ, platform, props)
-    sim.context.setPositions(crd.positions)
-    if crd.boxVectors is not None:
-        sim.context.setPeriodicBoxVectors(*crd.boxVectors)
+    sim, integ, platform_name, platform_failures = make_simulation(
+        prm.topology, system, lambda: mm.LangevinMiddleIntegrator(T * u.kelvin, 1 / u.picosecond, 0.002 * u.picoseconds),
+        crd.positions, crd.boxVectors)
     rows = []
 
     def snap(stage):
@@ -540,7 +569,7 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
     with open(out / "system_minimised.pdb", "w") as fh:
         app.PDBFile.writeFile(prm.topology, x_min * u.nanometer, fh, keepIds=True)
     smoke = list(oc.get("smoke_ps") or [])
-    if smoke and platform.getName() in ("CUDA", "OpenCL"):
+    if smoke and platform_name in ("CUDA", "OpenCL"):
         sim.context.setParameter("k_rest", k)
         nvt_steps = int(smoke[0] / 0.002)
         sim.context.setVelocitiesToTemperature(10 * u.kelvin)
@@ -563,14 +592,15 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
             fh.write(mm.XmlSerializer.serialize(st))
     elif smoke:
         rows.append({"Stage": "smoke run", "Finite": None, "Temperature (K)": None,
-                     "Zn–ligand distances (Å)": f"NOT RUN: platform {platform.getName()} (needs a GPU)"})
+                     "Zn–ligand distances (Å)": f"NOT RUN: platform {platform_name} (needs a GPU)"})
     with open(out / "system.xml", "w") as fh:
         fh.write(mm.XmlSerializer.serialize(system))
     df = pd.DataFrame(rows)
     d0 = rows[0]["_d"]
     df["Max Zn–ligand change (Å)"] = [round(float(np.max(np.abs(r["_d"] - d0))), 3) if isinstance(r.get("_d"), np.ndarray)
                                        and len(r["_d"]) == len(d0) and len(d0) else None for r in rows]
-    return df.drop(columns=["_d"]), {"platform": platform.getName(), "atoms": system.getNumParticles()}
+    return df.drop(columns=["_d"]), {"platform": platform_name, "atoms": system.getNumParticles(),
+                                     "platforms that failed": "; ".join(platform_failures) or "none"}
 
 
 def _temperature(sim, system) -> float:
@@ -688,8 +718,19 @@ def run_system_build(cfg: Any, prepared_pdb: str | Path | None = None, zinc_dir:
         **minfo, "box (Å)": cryst, "box source": box_source, **{k: v for k, v in tables["Composition"].attrs.items() if k != "box (Å)"}}.items()])
     leap = wd / "build.in"
     leap.write_text(tleap_script(cfg, smap, sol.bonds, cryst))
-    _run(["tleap", "-f", leap.name], wd, "build.log")
+    # tleap takes ~15 min on this system: reuse a finished build when its exact inputs are unchanged
+    done = wd / "build.done.json"
+    key = {f.name: sha256_file(f) for f in [sys_pdb, leap] + [wd / f.name for f in smap.files] if f.exists()}
+    outs = [wd / "system.prmtop", wd / "system.inpcrd", wd / "system_tleap.pdb", wd / "build.log"]
+    if done.exists() and json.loads(done.read_text()) == key and all(f.exists() and f.stat().st_size > 0 for f in outs):
+        log.info("reusing the tleap build (inputs unchanged)")
+    else:
+        if done.exists():
+            done.unlink()
+        _run(["tleap", "-f", leap.name], wd, "build.log")
     lg = parse_build_log((wd / "build.log").read_text())
+    if lg.get("errors") == 0 and (wd / "system.prmtop").exists() and (wd / "system.prmtop").stat().st_size > 0:
+        done.write_text(json.dumps(key, indent=1))
     tables["TleapBuild"] = pd.DataFrame([{"Item": k, "Value": json.dumps(v) if isinstance(v, list) else v} for k, v in lg.items()])
     prmtop, inpcrd, tpdb = wd / "system.prmtop", wd / "system.inpcrd", wd / "system_tleap.pdb"
     _step(prov, "tleap build", "tleap", [sys_pdb, leap] + [wd / f.name for f in smap.files], [prmtop, inpcrd, tpdb], lg)

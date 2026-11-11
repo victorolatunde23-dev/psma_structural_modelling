@@ -395,3 +395,55 @@ def test_gaff_loaded_for_hydroxide(cfg, tmp_path):
     (zd / "PSMA_tleap.in").write_text(t)
     lines = SB.tleap_script(cfg, SB.site_map(zd), [], None).splitlines()
     assert lines.count("source leaprc.gaff2") == 1 and "source leaprc.gaff" not in lines
+
+
+def test_platform_fallback_when_cuda_fails(monkeypatch):
+    """CUDA listed but unusable (e.g. CUDA_ERROR_UNSUPPORTED_PTX_VERSION on a T4): fall back to OpenCL."""
+    import types
+
+    class Platform:
+        def __init__(self, n):
+            self.n = n
+
+        @staticmethod
+        def getPlatformByName(n):
+            return Platform(n)
+
+    class Context:
+        def __init__(self, n):
+            self.n = n
+
+        def setPositions(self, p):
+            if self.n == "CUDA":
+                raise Exception("Error loading CUDA module: CUDA_ERROR_UNSUPPORTED_PTX_VERSION (222)")
+
+        def setPeriodicBoxVectors(self, *b):
+            pass
+
+        def getState(self, **k):
+            return None
+
+    class Simulation:
+        def __init__(self, top, system, integ, platform, props):
+            self.context = Context(platform.n)
+
+    mm = types.ModuleType("openmm")
+    mm.Platform = Platform
+    app = types.ModuleType("openmm.app")
+    app.Simulation = Simulation
+    mm.app = app
+    monkeypatch.setitem(sys.modules, "openmm", mm)
+    monkeypatch.setitem(sys.modules, "openmm.app", app)
+    sim, integ, name, failures = SB.make_simulation(None, None, lambda: object(), [0], box=(1, 2, 3))
+    assert name == "OpenCL" and len(failures) == 1 and "PTX" in failures[0]
+
+
+def test_tleap_build_reused_when_inputs_unchanged(cfg, tmp_path, fake_build_tools):
+    pdb = prepared_with_glycan(tmp_path / "microstate_00_default.pdb")
+    zd = zinc_dir(tmp_path / "zinc")
+    SB.run_system_build(cfg, pdb, zd, IssueLog(), run_md=False)
+    wd = cfg.outputs_dir / "md_setup" / "system"
+    stamp = (wd / "system.prmtop").stat().st_mtime_ns
+    assert (wd / "build.done.json").exists()
+    SB.run_system_build(cfg, pdb, zd, IssueLog(), run_md=False)
+    assert (wd / "system.prmtop").stat().st_mtime_ns == stamp

@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -57,6 +58,24 @@ def nvidia_gpu() -> str | None:
     r = subprocess.run(["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"],
                        capture_output=True, text=True)
     return r.stdout.strip().splitlines()[0] if r.returncode == 0 and r.stdout.strip() else None
+
+
+def driver_cuda_version() -> str | None:
+    """Highest CUDA version the installed NVIDIA driver supports ("CUDA Version: 12.4" in nvidia-smi), or None."""
+    if not shutil.which("nvidia-smi"):
+        return None
+    r = subprocess.run(["nvidia-smi"], capture_output=True, text=True)
+    m = re.search(r"CUDA Version:\s*([0-9]+\.[0-9]+)", r.stdout or "")
+    return m.group(1) if m else None
+
+
+def cuda_pin(cv: str | None) -> str | None:
+    """conda spec keeping the CUDA toolkit (NVRTC, which OpenMM uses to compile its kernels) no newer than the
+    driver; otherwise CUDA fails at first use with CUDA_ERROR_UNSUPPORTED_PTX_VERSION."""
+    if not cv:
+        return None
+    major = cv.split(".")[0]
+    return f"cuda-version>={major},<={cv}"
 
 
 def _mamba(prefix: str) -> str:
@@ -178,9 +197,12 @@ def install_env(repo: str | Path, prefix: str | None = None, gpu: bool = True, l
         root = Path(mamba).parents[1]
         Path(mamba).parent.mkdir(parents=True, exist_ok=True)
         _sh(f"curl -Ls https://micro.mamba.pm/api/micromamba/{plat}/latest | tar -xj -C '{root}' bin/micromamba", log)
+    pin = cuda_pin(driver_cuda_version())
     if not env_ready(prefix):
-        pk = " ".join(f"'{p}'" for p in PACKAGES)
+        pk = " ".join(f"'{p}'" for p in PACKAGES + ([pin] if pin else []))
         _sh(f"'{mamba}' create -y -q -p '{prefix}' -c conda-forge {pk}", log)
+    elif pin:                                  # existing environment (same session, maybe another GPU): enforce
+        _sh(f"'{mamba}' install -y -q -p '{prefix}' -c conda-forge '{pin}'", log)
     py = env_python(prefix)
     _sh(f"'{py}' -m pip install -q --no-deps -e '{repo}'", log)
     patched = patch_pymsmt(prefix)
@@ -192,7 +214,7 @@ def install_env(repo: str | Path, prefix: str | None = None, gpu: bool = True, l
     elif gpu:
         print("No NVIDIA GPU found (nvidia-smi): PySCF will use the CPU" if not card else
               "PySCF GPU support needs Linux or WSL2: PySCF will use the CPU")
-    return {"machine": "Colab" if in_colab() else f"local ({plat})", "NVIDIA GPU": card, "prefix": prefix,
+    return {"machine": "Colab" if in_colab() else f"local ({plat})", "NVIDIA GPU": card, "CUDA toolkit pin": pin, "prefix": prefix,
             "python": str(py), "gpu4pyscf installed": gpu_ok, "MCPB.py Seminario patch": bool(patched), "numpy 2 shim": bool(compat), "install log": str(log), **versions(prefix)}
 
 

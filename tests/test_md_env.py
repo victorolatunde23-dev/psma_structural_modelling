@@ -103,3 +103,8 @@ def test_numpy_compat_shim(tmp_path):
     r = subprocess.run([sys.executable, "-c", code, str(sp)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert r.stdout.split() == ["float64", "True", "True", "True"]
+
+
+def test_cuda_pin():
+    assert md_env.cuda_pin("12.4") == "cuda-version>=12,<=12.4"
+    assert md_env.cuda_pin(None) is None
