@@ -705,12 +705,37 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
     for i in protein_heavy_idx:
         rest.addParticle(i, pos[i].tolist())
     system.addForce(rest)
-    start_pos, start_report, pre = cpu_prerelax(
-        system, prm.topology, crd.positions, crd.boxVectors, out, float(oc.get("prerelax_max_force", 1e5)),
-        int(oc.get("prerelax_iterations", 100)), int(oc.get("prerelax_rounds", 5)))
+    # resumable: the minimisation saves its coordinates to the work folder (Drive) after every chunk
+    ck_file = out / "minimise_checkpoint.npz"
+    key = f"{sha256_file(prmtop)}:{sha256_file(inpcrd)}"
+    stage, pre = "prerelax", {}
+    if ck_file.exists():
+        ck = np.load(ck_file, allow_pickle=False)
+        if str(ck["key"]) == key and ck["positions"].shape == pos.shape:
+            stage, start_pos = str(ck["stage"]), ck["positions"] * u.nanometer
+            pre = json.loads(str(ck["pre"]))
+            log.info("resuming the minimisation at stage '%s' from %s", stage, ck_file.name)
+    if stage == "prerelax":
+        start_pos, start_report, pre = cpu_prerelax(
+            system, prm.topology, crd.positions, crd.boxVectors, out, float(oc.get("prerelax_max_force", 1e5)),
+            int(oc.get("prerelax_iterations", 100)), int(oc.get("prerelax_rounds", 5)))
+        stage = "restrained"
+
+    def save(stage_name, x_nm):
+        tmp = out / "minimise_checkpoint.tmp.npz"
+        np.savez(tmp, positions=np.asarray(x_nm, dtype=np.float64), stage=stage_name, key=key,
+                 pre=json.dumps(pre, default=float))
+        tmp.replace(ck_file)
+
+    if not ck_file.exists():                          # pre-relaxation finished: keep it even if the session ends
+        save(stage, np.asarray(start_pos.value_in_unit(u.nanometer)))
+
     sim, integ, platform_name, platform_failures = make_simulation(
         prm.topology, system, lambda: mm.LangevinMiddleIntegrator(T * u.kelvin, 1 / u.picosecond, 0.002 * u.picoseconds),
         start_pos, crd.boxVectors)
+    on_gpu = platform_name in ("CUDA", "OpenCL")
+    chunk = int(oc.get("min_chunk_gpu" if on_gpu else "min_chunk_cpu", 2000 if on_gpu else 200))
+    max_chunks = int(oc.get("min_max_chunks_gpu" if on_gpu else "min_max_chunks_cpu", 25 if on_gpu else 60))
     rows = []
 
     def snap(stage):
@@ -728,12 +753,40 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
                                                                   np.diag(st.getPeriodicBoxVectors(asNumpy=True).value_in_unit(u.nanometer)))})
         return x
 
-    snap("start")
     tol = float(oc.get("min_tolerance", 10.0)) * u.kilojoule_per_mole / u.nanometer
-    mm.LocalEnergyMinimizer.minimize(sim.context, tol, 0)
-    snap("minimised (restrained)")
+    target = float(oc.get("max_force_ok", 1000.0)) * float(oc.get("min_target_fraction", 0.5))
+
+    def minimise(stage_name):
+        """Minimise in chunks, saving after each; stop when the largest force is below the target or the energy
+        stops falling (or after max_chunks)."""
+        last = None
+        for n in range(1, max_chunks + 1):
+            mm.LocalEnergyMinimizer.minimize(sim.context, tol, chunk)
+            st = sim.context.getState(getEnergy=True, getForces=True, getPositions=True)
+            e = st.getPotentialEnergy().value_in_unit(u.kilojoule_per_mole)
+            fmax = float(np.nanmax(np.linalg.norm(
+                st.getForces(asNumpy=True).value_in_unit(u.kilojoule_per_mole / u.nanometer), axis=1)))
+            save(stage_name, st.getPositions(asNumpy=True).value_in_unit(u.nanometer))
+            log.info("%s minimisation (%s) chunk %d: E = %.1f kJ/mol, max force %.1f kJ/mol/nm",
+                     stage_name, platform_name, n, e, fmax)
+            if not np.isfinite(e):
+                raise RuntimeError(f"energy became {e} during the {stage_name} minimisation")
+            if fmax <= target or (last is not None and last - e < 10.0):
+                return n
+            last = e
+        return max_chunks
+
+    snap("start" if stage == "restrained" else f"start (resumed: {stage})")
+    if stage == "restrained":
+        pre["restrained minimisation chunks"] = minimise("restrained")
+        snap("minimised (restrained)")
+        stage = "unrestrained"
+        save(stage, sim.context.getState(getPositions=True).getPositions(asNumpy=True).value_in_unit(u.nanometer))
     sim.context.setParameter("k_rest", 0.0)
-    mm.LocalEnergyMinimizer.minimize(sim.context, tol, 0)
+    if stage == "unrestrained":
+        pre["unrestrained minimisation chunks"] = minimise("unrestrained")
+        stage = "done"
+        save(stage, sim.context.getState(getPositions=True).getPositions(asNumpy=True).value_in_unit(u.nanometer))
     x_min = snap("minimised (unrestrained)")
     with open(out / "system_minimised.pdb", "w") as fh:
         app.PDBFile.writeFile(prm.topology, x_min * u.nanometer, fh, keepIds=True)
@@ -765,10 +818,11 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
     with open(out / "system.xml", "w") as fh:
         fh.write(mm.XmlSerializer.serialize(system))
     df = pd.DataFrame(rows)
-    d0 = rows[0]["_d"]
+    d0 = distances(pos, zn_pairs) if zn_pairs else np.array([])     # as built (before any relaxation)
     df["Max Zn–ligand change (Å)"] = [round(float(np.max(np.abs(r["_d"] - d0))), 3) if isinstance(r.get("_d"), np.ndarray)
                                        and len(r["_d"]) == len(d0) and len(d0) else None for r in rows]
     return df.drop(columns=["_d"]), {"platform": platform_name, "atoms": system.getNumParticles(), **pre,
+                                     "minimisation chunk (iterations)": chunk,
                                      "platforms that failed": "; ".join(platform_failures) or "none"}
 
 

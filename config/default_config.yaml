@@ -491,6 +491,11 @@ md:                             # Milestone 6: system setup (notebook 05)
     prerelax_max_force: 1.0e+5     # kJ/mol/nm; relax on the CPU (double precision) until below, then GPU
     prerelax_iterations: 100      # per CPU round (~5–10 min each for ~535k atoms on 2 CPU cores)
     prerelax_rounds: 5
+    min_chunk_gpu: 2000             # minimiser iterations between checkpoints (GPU)
+    min_chunk_cpu: 200              # ... on the CPU (~5–15 min per chunk for ~535k atoms)
+    min_max_chunks_gpu: 25
+    min_max_chunks_cpu: 60
+    min_target_fraction: 0.5        # stop a stage when max force < 0.5 × max_force_ok, or E stops falling
     zn_bond_max_change: 0.3     # Å; Zn–ligand distance change allowed through minimisation / smoke run
     smoke_ps: [20, 20]          # restrained NVT heating to 310 K, then restrained NPT (membrane barostat); [] = skip
     temperature_k: 310

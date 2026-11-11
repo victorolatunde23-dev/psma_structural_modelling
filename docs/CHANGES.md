@@ -379,3 +379,13 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
   - **two overlapping lipids are kept** and counted ("lipid–lipid overlaps left to minimisation"), and the CPU pre-relaxation resolves them;
   - the one overlap minimisation cannot undo, **a lipid bond threaded through a cholesterol ring**, is now detected (`ring_piercings`) and that lipid removed.
   - MergeSummary reports the number of rings checked and piercings found.
+
+### Minimisation on the CPU, resumable (v0.7.14)
+
+- With the GPU allowance used up, notebook 05 section F now **minimises on the CPU** when there is no GPU (`MINIMISE_ON_CPU = True`); the 40 ps test run still needs a GPU and stays NOT RUN, which counts as a WARNING in MDReadiness.
+- **The minimisation is chunked and resumable** on any platform:
+  - it runs in chunks of `min_chunk_cpu` (200) or `min_chunk_gpu` (2000) iterations;
+  - after each chunk the coordinates are saved to `minimise_checkpoint.npz` in the work folder, keyed to the prmtop/inpcrd hashes;
+  - re-running continues from the last stage and chunk, and the CPU pre-relaxation is saved as well.
+  - A stage stops when the largest force is below `min_target_fraction` × `max_force_ok` (500 kJ/mol/nm), when the energy stops falling (< 10 kJ/mol per chunk), or after `min_max_chunks_*`.
+- **Zn–ligand distance changes are now measured from the built coordinates** (before any relaxation).
