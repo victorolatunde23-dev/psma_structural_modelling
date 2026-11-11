@@ -345,30 +345,94 @@ def _mol_kind(names) -> str:
             else "ion" if names <= IONS else "other")
 
 
-def environment_overlaps(env: pd.DataFrame, any_cut: float = 0.9, heavy_cut: float = 1.5) -> set:
-    """Molecules to remove so no two environment molecules overlap (any atoms < any_cut Å, heavy atoms <
-    heavy_cut Å). Of each overlapping pair the water (then ion, then lipid) is removed; between two of the same
-    kind, the later one. Such overlaps make the first minimisation steps blow up (NaN coordinates)."""
+def environment_overlaps(env: pd.DataFrame, any_cut: float = 0.9, heavy_cut: float = 1.5,
+                         stats: dict | None = None) -> set:
+    """Molecules to remove where environment molecules overlap (any atoms < any_cut Å, heavy atoms < heavy_cut Å).
+
+    A water or ion overlapping anything is removed (the solvent re-fills during equilibration). Two
+    overlapping lipids are *not* removed: an imperfect packing leaves many tail–tail contacts, and deleting
+    those lipids would punch holes in the bilayer (the first attempt removed 150 of 684 POPC). They are
+    relaxed by the CPU pre-relaxation instead; only a lipid threaded through a cholesterol ring, which
+    minimisation cannot undo, is removed (see ``ring_piercings``)."""
     from scipy.spatial import cKDTree
 
     if not len(env):
         return set()
     kind = {m: _mol_kind(g) for m, g in env.groupby("mol")["resname"]}
-    mol = env["mol"].to_numpy()
     remove: set = set()
+    lipid_pairs: set = set()
     for sub, cut in ((env, any_cut), (env[env["element"] != "H"], heavy_cut)):
         if len(sub) < 2:
             continue
         X = sub[["x", "y", "z"]].to_numpy()
         m = sub["mol"].to_numpy()
-        pairs = cKDTree(X).query_pairs(cut, output_type="ndarray")
-        for i, j in pairs:
+        for i, j in cKDTree(X).query_pairs(cut, output_type="ndarray"):
             a, b = m[i], m[j]
             if a == b or a in remove or b in remove:
                 continue
-            ka, kb = KIND_PRIORITY[kind[a]], KIND_PRIORITY[kind[b]]
-            remove.add(a if (ka, -a) < (kb, -b) else b)
-    del mol
+            ka, kb = kind[a], kind[b]
+            if ka == "lipid" and kb == "lipid":
+                lipid_pairs.add((min(a, b), max(a, b)))
+                continue
+            pa, pb = KIND_PRIORITY[ka], KIND_PRIORITY[kb]
+            remove.add(a if (pa, -a) < (pb, -b) else b)
+    if stats is not None:
+        stats["lipid–lipid overlaps left to minimisation"] = len(lipid_pairs)
+    return remove
+
+
+def ring_piercings(env: pd.DataFrame, bond_max: float = 1.7, stats: dict | None = None) -> set:
+    """Lipids with a bond threaded through a cholesterol ring (5- or 6-membered); returns the molecules to remove.
+
+    A bond pierces a ring when its two atoms lie on opposite sides of the ring plane and the crossing point is
+    inside the ring (closer to the ring centre than 85% of the ring's mean radius). The piercing molecule is
+    removed (the non-cholesterol one, or the later of two cholesterols)."""
+    import networkx as nx
+    from scipy.spatial import cKDTree
+
+    heavy = env[(env["element"] != "H") & env["mol"].isin(
+        [m for m, g in env.groupby("mol")["resname"] if _mol_kind(g) == "lipid"])]
+    if not len(heavy):
+        return set()
+    X = heavy[["x", "y", "z"]].to_numpy()
+    mol = heavy["mol"].to_numpy()
+    res = heavy["resname"].to_numpy()
+    pairs = cKDTree(X).query_pairs(bond_max, output_type="ndarray")
+    bonds = pairs[mol[pairs[:, 0]] == mol[pairs[:, 1]]] if len(pairs) else pairs
+    rings = []
+    chl = np.flatnonzero(np.isin(res, list(STEROLS)))
+    if not len(chl) or not len(bonds):
+        return set()
+    chl_set = set(chl.tolist())
+    g = nx.Graph()
+    g.add_edges_from((int(a), int(b)) for a, b in bonds if a in chl_set and b in chl_set)
+    for cyc in nx.minimum_cycle_basis(g):
+        if len(cyc) in (5, 6):
+            P = X[cyc]
+            c = P.mean(0)
+            n = np.linalg.svd(P - c)[2][-1]
+            rings.append((c, n, float(np.linalg.norm(P - c, axis=1).mean()), mol[cyc[0]]))
+    mids = (X[bonds[:, 0]] + X[bonds[:, 1]]) / 2
+    tree = cKDTree(mids)
+    remove: set = set()
+    hits = 0
+    for c, n, r, m_ring in rings:
+        for k in tree.query_ball_point(c, r + 1.0):
+            a, b = bonds[k]
+            m_b = mol[a]
+            if m_b == m_ring or m_b in remove:
+                continue
+            sa, sb = float(n @ (X[a] - c)), float(n @ (X[b] - c))
+            if sa * sb >= 0:
+                continue
+            x = X[a] + (X[b] - X[a]) * sa / (sa - sb)
+            if np.linalg.norm(x - c) < 0.85 * r:
+                hits += 1
+                victim = m_b if res[a] not in STEROLS else max(m_b, m_ring)
+                remove.add(victim)
+    if stats is not None:
+        stats["cholesterol ring piercings"] = hits
+        stats["cholesterol rings checked"] = len(rings)
     return remove
 
 
@@ -407,7 +471,10 @@ def merge_with_membrane(sol: Solute, packed: pd.DataFrame, cryst: list[float] | 
     bad_mols |= set(hyd.loc[dh < clash_h, "mol"]) if len(hyd) else set()
     n_solute = len(bad_mols)
     # overlaps between environment molecules left by an imperfect packing (packmol tolerance not reached)
-    overlap = environment_overlaps(env[~env["mol"].isin(bad_mols)])
+    ostats: dict = {}
+    rest = env[~env["mol"].isin(bad_mols)]
+    pierced = ring_piercings(rest, stats=ostats)
+    overlap = environment_overlaps(rest[~rest["mol"].isin(pierced)], stats=ostats) | pierced
     bad_mols |= overlap
     comp = []
     first_seq = int(sol.residues["seq"].max())
@@ -432,7 +499,9 @@ def merge_with_membrane(sol: Solute, packed: pd.DataFrame, cryst: list[float] | 
     out.append("END")
     comp = pd.DataFrame(comp)
     return out, comp, {"superposition RMSD (Å)": round(rmsd_fit, 3), "molecules removed": len(bad_mols),
-                       "removed: touching the protein": n_solute, "removed: overlapping other molecules": len(overlap)}
+                       "removed: touching the protein": n_solute,
+                       "removed: water/ion overlapping other molecules": len(overlap) - len(pierced),
+                       "removed: lipids piercing a cholesterol ring": len(pierced), **ostats}
 
 
 def composition_table(comp: pd.DataFrame, box: list[float] | None, lipids_req: str, ratio_req: str) -> pd.DataFrame:

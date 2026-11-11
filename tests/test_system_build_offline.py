@@ -458,5 +458,22 @@ def test_environment_overlaps_remove_water_first():
     add(2, "WAT", "O", "O", (10, 0, 0)); add(3, "WAT", "O", "O", (10.6, 0, 0))   # two waters -> the later one
     add(4, "CHL", "C1", "C", (20, 0, 0)); add(5, "PA", "C1", "C", (20.5, 0, 0)); add(5, "PC", "P", "P", (22, 0, 0))
     add(6, "WAT", "O", "O", (40, 0, 0))                    # isolated: kept
-    rem = SB.environment_overlaps(pd.DataFrame(rows))
-    assert rem == {1, 3, 5}
+    stats = {}
+    rem = SB.environment_overlaps(pd.DataFrame(rows), stats=stats)
+    assert rem == {1, 3} and stats["lipid–lipid overlaps left to minimisation"] == 1   # CHL/POPC overlap kept
+
+
+def test_ring_piercing_detected():
+    """A lipid bond through a cholesterol ring is found; one beside the ring is not."""
+    rows = []
+    ang = np.linspace(0, 2 * np.pi, 7)[:-1]
+    for k, t in enumerate(ang):                                     # hexagonal ring, radius 1.4 Å, in the xy plane
+        rows.append({"mol": 0, "resname": "CHL", "atom": f"C{k}", "element": "C",
+                     "x": 1.4 * np.cos(t), "y": 1.4 * np.sin(t), "z": 0.0})
+    for z, m in ((-0.75, 1), (0.75, 1)):                             # bond along z through the ring centre
+        rows.append({"mol": m, "resname": "OL", "atom": f"C{int(z > 0)}", "element": "C", "x": 0.1, "y": 0.0, "z": z})
+    for z in (-0.75, 0.75):                                          # bond outside the ring
+        rows.append({"mol": 2, "resname": "PA", "atom": f"C{int(z > 0)}", "element": "C", "x": 4.0, "y": 0.0, "z": z})
+    stats = {}
+    assert SB.ring_piercings(pd.DataFrame(rows), stats=stats) == {1}
+    assert stats["cholesterol ring piercings"] == 1 and stats["cholesterol rings checked"] == 1

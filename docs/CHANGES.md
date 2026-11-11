@@ -366,3 +366,16 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
   - MergeSummary now reports the removals by cause.
 - **OpenMM:** `cpu_prerelax` relaxes on the CPU platform (double precision) in rounds of 100 steps until the largest force is below 10⁵ kJ/mol/nm, then the GPU minimises as before.
 - **New table StartForces (`start_forces.csv`):** the 15 most strained atoms before any minimisation (residue, atom, kind, force). It is written even when minimisation fails, so a remaining problem (for example a lipid tail through a cholesterol ring) can be located.
+
+### Keep overlapping lipids; remove only ring piercings (v0.7.13)
+
+- **Run of 2026-11-11 14:30 (no GPU in that session, so build only):** the stricter merge of v0.7.12 removed 164 molecules:
+  - 14 touching the protein;
+  - **150 for overlapping other molecules, almost all POPC.** 534 of 684 POPC were left, and the cholesterol fraction rose to 0.354 (WARNING).
+  
+  That would leave holes in the bilayer. The overlaps come from the shortened packing (30 all-together loops) and are mostly lipid tails touching each other, which minimisation can relax.
+- **New policy:**
+  - waters and ions that overlap anything are still removed;
+  - **two overlapping lipids are kept** and counted ("lipid–lipid overlaps left to minimisation"), and the CPU pre-relaxation resolves them;
+  - the one overlap minimisation cannot undo, **a lipid bond threaded through a cholesterol ring**, is now detected (`ring_piercings`) and that lipid removed.
+  - MergeSummary reports the number of rings checked and piercings found.
