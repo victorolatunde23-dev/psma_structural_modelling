@@ -800,7 +800,9 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
             stage, start_pos = str(ck["stage"]), ck["positions"] * u.nanometer
             pre = json.loads(str(ck["pre"]))
             log.info("resuming the minimisation at stage '%s' from %s", stage, ck_file.name)
-    if stage == "prerelax":
+    if stage == "prerelax":                         # a fresh start: drop diagnostics left by an earlier system
+        for f in ("runaway_forces.csv", "minimisation_chunks.csv", "minimisation_progress.csv", "final_forces.csv"):
+            (out / f).unlink(missing_ok=True)
         start_pos, start_report, pre = cpu_prerelax(
             system, prm.topology, crd.positions, crd.boxVectors, out, float(oc.get("prerelax_max_force", 1e5)),
             int(oc.get("prerelax_iterations", 100)), int(oc.get("prerelax_rounds", 5)),
@@ -890,6 +892,8 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
         stage = "done"
         save(stage, sim.context.getState(getPositions=True).getPositions(asNumpy=True).value_in_unit(u.nanometer))
     x_min = snap("minimised (unrestrained)")
+    force_report(prm.topology, sim.context.getState(getForces=True).getForces(asNumpy=True).value_in_unit(
+        u.kilojoule_per_mole / u.nanometer)).to_csv(out / "final_forces.csv", index=False)   # what is left after minimising
     with open(out / "system_minimised.pdb", "w") as fh:
         app.PDBFile.writeFile(prm.topology, x_min * u.nanometer, fh, keepIds=True)
     for i, q, sig, eps in soft_core:                         # back to the real force field
@@ -1116,6 +1120,8 @@ def run_system_build(cfg: Any, prepared_pdb: str | Path | None = None, zinc_dir:
             tables["MinimisationChunks"] = pd.read_csv(wd / "minimisation_chunks.csv")
         if (wd / "runaway_forces.csv").exists():
             tables["RunawayForces"] = pd.read_csv(wd / "runaway_forces.csv")
+        if (wd / "final_forces.csv").exists():
+            tables["FinalForces"] = pd.read_csv(wd / "final_forces.csv")
     after = {p: sha256_file(Path(p)) for p in originals}
     tables["SystemChecks"] = system_checks(tables, lg, md, originals, after, cfg)
     tables["MDReadiness"] = md_readiness(tables, cfg)

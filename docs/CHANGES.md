@@ -424,6 +424,17 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Fix:** each box edge is now **max(packmol box, actual coordinate extent) + 2 Å**. No two atoms can then be closer than 2 Å through the boundary. MergeSummary reports which source set each axis, and the contact count for the plain packmol box.
 - **New tables:** `Minimisation` (stages reached) and **`MinimisationChunks`** (energy and max force after every chunk) are written as the run goes, so a failure shows where it happened.
 
+### Empirical zinc force constants; final-force table (v0.7.20)
+
+- **Run of 2026-11-12 14:20 (T4), v0.7.19:** for the first time the whole system minimised and ran the 40 ps test (heated to 300 K, NPT at 310 K, all finite). Two critical checks failed:
+  - largest force after minimisation 2,550 kJ/mol/nm (limit 1,000);
+  - Zn2 collapsed onto two of its oxygens in both chains: Asp387 OD2 2.04 → 1.59/1.57 Å and the hydroxide O 2.06 → 1.69/1.65 Å (Zn1–Asp387 OD1 1.90 → 1.71 Å).
+- **Cause:** the Seminario force constants for those bonds are weak (Asp387 OD2 35.8, hydroxide O–Zn2 41.8, Glu425 OE2 29.5, His553 29.2 kcal/mol/Å²) or zero (Glu425 OE1). They are too weak to hold Zn2 (+1.04) against the electrostatic pull of the surrounding carboxylates in the full system.
+- **Decision (user, 2026-11-12):** use MCPB.py's **empirical** force constants (`md.mcpb.force_constants: empirical`, MCPB.py `-s 2e`; Peters et al., *J. Chem. Theory Comput.* 2010, 6, 2935). Each Zn–ligand k now comes from its bond length, so none can be near zero. Charges (RESP), r0 values and the QM are unchanged and reused; `seminario` and `zmatrix` remain available. The zinc stage reruns MCPB.py steps 2e–4 (minutes, no new QM), then the tleap build and minimisation rerun because the frcmod changed.
+- New check `zn_force_constants` (ZincChecks): WARNING if any Zn bond k is below 10 kcal/mol/Å².
+- New table **FinalForces**: the 15 atoms with the largest force after minimisation.
+- Diagnostics left by an earlier system (RunawayForces, MinimisationChunks) are deleted when a minimisation starts afresh, so they are no longer shown as if they were new.
+
 ### Hydroxide hydrogen given a Lennard-Jones core (v0.7.19)
 
 - **Run of 2026-11-12 13:00 (T4):** the box stayed clean (0 boundary contacts). The restrained minimisation ran away again (max force 3.1 × 10⁹ in chunk 2), and the new **RunawayForces** table named the two atoms: the chain-A bridging-hydroxide **H** (OX1 1503) and **Glu425 OE2**, a Zn2 ligand. All other atoms were below 4 × 10⁴.

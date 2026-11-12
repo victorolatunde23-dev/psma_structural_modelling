@@ -9,7 +9,7 @@ Design: ``docs/M6_ZINC_PARAMETERS.md``. Workflow (all inside Colab):
 2. **MCPB.py step 1** builds the small/large models and writes Gaussian inputs.
 3. **QM** with PySCF through :mod:`qm_bridge` (B3LYP/6-31G*, Gaussian-equivalent settings),
    writing the ``.fchk`` / ``.log`` files MCPB.py reads (``software_version g09``).
-4. **MCPB.py steps 2–4**: Seminario force constants, RESP charges, tleap input.
+4. **MCPB.py steps 2–4**: force constants (empirical, `-s 2e`, by default; Seminario `-s 2` optional), RESP charges, tleap input.
 5. **Validation**: Zn–ligand equilibrium lengths vs the experimental site, force constants,
    RESP charges (integer residue sums), and a tleap build of the parameterised chain.
 
@@ -152,6 +152,13 @@ def water_mol2(o) -> str:
     return ("@<TRIPOS>MOLECULE\nWTB\n    1     0     1     0     1\nSMALL\nUSER_CHARGES\n@<TRIPOS>ATOM\n"
             f"      1 O       {o[0]:10.4f}{o[1]:10.4f}{o[2]:10.4f} ow         1 WTB      -0.834000\n"
             "@<TRIPOS>BOND\n@<TRIPOS>SUBSTRUCTURE\n     1 WTB         1 ****              0 ****  ****    0 ROOT\n")
+
+
+# MCPB.py step 2 variants for the bond/angle force constants. "empirical" (-s 2e) sets each metal–ligand force
+# constant from its bond length (Peters et al., J. Chem. Theory Comput. 2010, 6, 2935), so none can come out near zero.
+# The Seminario values from the H-only optimised (non-minimum) geometry were 0–42 kcal/mol/Å² for five of the nine
+# bonds, and Zn2 collapsed onto Asp387 OD2 and the hydroxide O (2.04 -> 1.58 Å) in the membrane minimisation.
+FC_STEPS = {"seminario": "2", "empirical": "2e", "zmatrix": "2z"}
 
 
 def mcpb_input(group: str, pdb_name: str, ion_ids: list[int], cfg: Any, has_ohx: bool = True) -> str:
@@ -365,7 +372,11 @@ def run_zinc_parameters(cfg: Any, prepared_pdb: str | Path | None = None, issues
                                         for k, v in qm.items() if isinstance(v, dict) for kk, vv in v.items()])
 
     # ---- 4. MCPB.py steps 2-4 ----------------------------------------------------------------------------
-    for step, label in (("2", "Seminario force constants"), ("3", "RESP charges"), ("4", "tleap input")):
+    fc = str(m.get("force_constants", "seminario")).lower()
+    fc_step = FC_STEPS.get(fc)
+    if fc_step is None:
+        raise ValueError(f"md.mcpb.force_constants must be one of {sorted(FC_STEPS)}, not {fc!r}")
+    for step, label in ((fc_step, f"{fc} force constants"), ("3", "RESP charges"), ("4", "tleap input")):
         r = _run(["MCPB.py", "-i", f"{group}.in", "-s", step], wd, f"mcpb_step{step}.log")
         if r.returncode != 0:
             issues.add("zinc", Status.FAIL, f"MCPB.py step {step} ({label}) failed: see {wd / f'mcpb_step{step}.log'}")
@@ -374,7 +385,7 @@ def run_zinc_parameters(cfg: Any, prepared_pdb: str | Path | None = None, issues
     tleap_in = wd / f"{group}_tleap.in"
     final_pdb = wd / f"{group}_mcpbpy.pdb"
     mol2s = sorted(set(wd.glob("*.mol2")) - {wd / "ZN.mol2", wd / "OHX.mol2"})
-    _step(prov, "MCPB.py steps 2-4", "MCPB.py -s 2/3/4", [wd / f"{group}_small_opt.fchk", wd / f"{group}_large_mk.log"],
+    _step(prov, "MCPB.py steps 2-4", f"MCPB.py -s {fc_step}/3/4", [wd / f"{group}_small_opt.fchk", wd / f"{group}_large_mk.log"],
           [frc, tleap_in, final_pdb] + mol2s)
 
     # ---- 5. validation -------------------------------------------------------------------------------------
@@ -450,6 +461,10 @@ def zinc_checks(t: dict, lg: dict, before: dict, after: dict, qm: dict, cfg: Any
     nb = int(zb["MCPB k (kcal/mol/Å²)"].notna().sum()) if len(zb) else 0
     add("zn_bonds_parameterised", Status.PASS if len(zb) and nb == len(zb) else Status.FAIL, f"{nb} of {len(zb)} Zn bonds have r0/k")
     if len(zb):
+        kmin = float(zb["MCPB k (kcal/mol/Å²)"].min())
+        add("zn_force_constants", Status.PASS if kmin >= 10 else Status.WARNING,
+            f"{cfg.get('md.mcpb.force_constants', 'seminario')} method; smallest Zn bond k {kmin:.1f} kcal/mol/Å²"
+            + ("" if kmin >= 10 else " (a near-zero spring lets the zinc drift in the full system)"))
         dev = zb["r0 − model (Å)"].abs().max()
         add("zn_r0_vs_structure", Status.PASS if dev <= 0.15 else Status.WARNING,
             f"max |r0 − model distance| {dev:.3f} Å (QM-optimised vs the prepared model)")

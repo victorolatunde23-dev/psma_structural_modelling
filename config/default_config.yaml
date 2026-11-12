@@ -462,6 +462,8 @@ md:                             # Milestone 6: system setup (notebook 05)
     gaff: 1
     large_opt: 0                # large model: single point for RESP (geometry from the prepared model)
     scale_factor: 0.9614        # B3LYP/6-31G* frequency scale factor (Scott & Radom 1996)
+    force_constants: empirical  # USER DECISION (2026-11-12): MCPB.py -s 2e. Seminario (-s 2) gave k = 0–42 for five Zn bonds
+                                # (Glu425 OE1 k = 0); Zn2–O then shortened 0.4 Å in the membrane minimisation
     bondfc_avg: 1
     anglefc_avg: 1
     qm_method: B3LYP/6-31G*     # MCPB.py default; run with PySCF (Gaussian B3LYP = b3lypg, UltraFine grid)

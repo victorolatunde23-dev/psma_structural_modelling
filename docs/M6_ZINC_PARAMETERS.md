@@ -40,7 +40,7 @@ Outputs:
    - **MK:** SCF, then the electrostatic potential on Merz–Kollman points. These are four shells at 1.4/1.6/1.8/2.0 × the MK radii (H 1.20, C/N 1.50, O 1.40, S 1.75, Zn from `ReadRadii`), at `IOp(6/42=n)` points per Å², on Fibonacci spheres rather than Gaussian's own point set (RESP is insensitive to the choice).
 
    It writes `*_small_opt.fchk` (`Current cartesian coordinates` in Bohr and the lower-triangle `Cartesian Force Constants` in Hartree/Bohr², 5E16.8) and `*_large_mk.log` (the `Electrostatic Properties Using The SCF Density` and `Electrostatic Properties (Atomic Units)` sections, with coordinates in columns 33–62). These are the fields and layouts read by `pymsmt.mol.gauio` (`get_crds_from_fchk`, `get_matrix_from_fchk`, `get_esp_from_gau`). Every QM result is cached (`*.npz`), so an interrupted run resumes.
-4. **MCPB.py steps 2–4:** Seminario force constants (`*_mcpbpy.frcmod`), RESP charges (renamed residue `.mol2` templates) and the tleap input (`*_tleap.in`, with Zn–ligand bond commands).
+4. **MCPB.py steps 2–4:** force constants (`*_mcpbpy.frcmod`; **empirical**, `-s 2e`, since v0.7.20: the Seminario values let Zn2 collapse onto Asp387 OD2 and the hydroxide in the membrane system, see CHANGES), RESP charges (renamed residue `.mol2` templates) and the tleap input (`*_tleap.in`, with Zn–ligand bond commands).
 5. **Validation build.** tleap loads the parameterised chain (MCPB.py's input without solvation), runs `check` and `charge`, and saves a prmtop.
 
 ## Checks (`ZincChecks`)

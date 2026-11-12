@@ -254,7 +254,7 @@ assert all(atoms[i - 1][17:20].strip() == "ZN" for i in ions), "ion_ids do not p
 if step == "1":
     for n in ("small_opt", "small_fc", "large_mk"):
         Path(f"{g}_{n}.com").write_text("%Chk=x\n# B3LYP/6-31G* Opt\n\nCLR\n\n0  1\nZn 0.0 0.0 0.0\n\n")
-elif step == "2":
+elif step in ("2", "2e", "2z"):
     Path(f"{g}_mcpbpy.frcmod").write_text(Path("{frcmod}").read_text())
 elif step == "3":
     def mol2(name, atoms):
@@ -338,6 +338,8 @@ def test_run_zinc_parameters_orchestration(cfg, tmp_path, fake_amber, monkeypatc
     assert "solvatebox" not in (wd / "check_build.in").read_text()
     prov = json.loads((wd / "provenance.json").read_text())
     assert [s["name"] for s in prov["steps"]][:2] == ["site PDB + MCPB input", "MCPB.py step 1 (models + Gaussian inputs)"]
+    assert any(s["tool"] == "MCPB.py -s 2e/3/4" for s in prov["steps"])        # empirical force constants (default)
+    assert "zn_force_constants" in set(res.tables["ZincChecks"]["Check"])
     from psma_pipeline.excel_output import data_dictionary
     paths = ZP.save_zinc_parameters(cfg, res, tag="test")
     assert paths["workbook"].exists()
