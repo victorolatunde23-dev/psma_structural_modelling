@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import shutil
 from dataclasses import dataclass, field
@@ -704,6 +705,51 @@ def cpu_prerelax(system, topology, positions, box, out: Path, threshold: float =
                          "max force after CPU pre-relaxation (kJ/mol/nm)": f}
 
 
+def metal_hydroxide_h(topology) -> list[int]:
+    """Indices of hydrogens on an oxygen that is bonded to a zinc (the bridging hydroxide's H)."""
+    def is_zn(a):
+        return (a.element is not None and a.element.symbol == "Zn") or a.name.upper().startswith("ZN")
+    nb: dict[int, list] = {}
+    for b in topology.bonds():
+        nb.setdefault(b[0].index, []).append(b[1])
+        nb.setdefault(b[1].index, []).append(b[0])
+    out = []
+    for a in topology.atoms():
+        if a.element is None or a.element.symbol != "H":
+            continue
+        for o in nb.get(a.index, []):
+            if o.element is not None and o.element.symbol == "O" and any(is_zn(z) for z in nb.get(o.index, [])):
+                out.append(a.index)
+    return out
+
+
+def give_h_lj(nbf, atoms: list[int], sigma_nm: float, eps_kj: float, scnb: float = 2.0) -> dict:
+    """Give the listed (bare, zero-LJ) hydrogens a small Lennard-Jones core, in the particle parameters AND in their
+    1-4 exceptions (OpenMM keeps 1-4 pairs as separate exceptions that particle changes do not reach).
+
+    Why: GAFF gives the hydroxide H (type ho) no LJ at all. Through the bonded zinc model, H–O(hydroxide)–Zn–O(Glu)
+    is a 1-4 pair, so the H feels a scaled Coulomb pull to the negative Glu oxygen with nothing to stop it, and
+    collapses onto it (Glu425 OE2, run of 2026-11-12, forces 3e9). The core used (r*=0.6 Å, ε=0.0157 kcal/mol,
+    i.e. the ff14SB amide-H values) stops that at a hydrogen-bond-like distance (~1.5 Å) and is permanent: it is
+    part of the system used for minimisation and dynamics."""
+    import openmm.unit as u
+    sel = set(atoms)
+    for i in atoms:
+        q, _, _ = nbf.getParticleParameters(i)
+        nbf.setParticleParameters(i, q, sigma_nm * u.nanometer, eps_kj * u.kilojoule_per_mole)
+    changed = 0
+    for k in range(nbf.getNumExceptions()):
+        i, j, qq, sig, eps = nbf.getExceptionParameters(k)
+        if (i in sel or j in sel) and qq.value_in_unit(u.elementary_charge ** 2) != 0.0:   # 1-4 pair (not an exclusion)
+            _, si, ei = nbf.getParticleParameters(i)
+            _, sj, ej = nbf.getParticleParameters(j)
+            s = 0.5 * (si.value_in_unit(u.nanometer) + sj.value_in_unit(u.nanometer))
+            e = math.sqrt(ei.value_in_unit(u.kilojoule_per_mole) * ej.value_in_unit(u.kilojoule_per_mole)) / scnb
+            nbf.setExceptionParameters(k, i, j, qq, s * u.nanometer, e * u.kilojoule_per_mole)
+            changed += 1
+    return {"hydroxide H given an LJ core": len(atoms), "1-4 pairs updated": changed}
+
+
 def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, int]], out: Path,
                protein_heavy_idx: list[int]) -> tuple[pd.DataFrame, dict]:
     """Restrained + unrestrained minimisation and an optional restrained NVT/NPT smoke run."""
@@ -730,6 +776,11 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
     # the GPU's limit, then NaN: run of 2026-11-12). Give them a tiny repulsive core during minimisation only;
     # the original parameters are restored before any dynamics and in the saved system.
     nbf = next(f for f in system.getForces() if isinstance(f, mm.NonbondedForce))
+    oh_h = metal_hydroxide_h(prm.topology)
+    oh_info = give_h_lj(nbf, oh_h, float(oc.get("hydroxide_h_sigma_nm", 0.1069)),
+                        float(oc.get("hydroxide_h_epsilon_kj", 0.0657))) if oh_h else {}
+    if oh_h:
+        log.info("hydroxide H %s: %s", oh_h, oh_info)
     soft_core = []
     sig_min = float(oc.get("min_bare_h_sigma_nm", 0.1)) * u.nanometer
     eps_min = float(oc.get("min_bare_h_epsilon_kj", 0.01)) * u.kilojoule_per_mole
@@ -846,6 +897,7 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
     if soft_core:
         nbf.updateParametersInContext(sim.context)
     pre["charged atoms given a minimisation-only repulsive core"] = len(soft_core)
+    pre.update(oh_info)
     smoke = list(oc.get("smoke_ps") or [])
     if smoke and platform_name in ("CUDA", "OpenCL"):
         sim.context.setParameter("k_rest", k)

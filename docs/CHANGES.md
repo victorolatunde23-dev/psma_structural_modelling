@@ -424,6 +424,13 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Fix:** each box edge is now **max(packmol box, actual coordinate extent) + 2 Å**. No two atoms can then be closer than 2 Å through the boundary. MergeSummary reports which source set each axis, and the contact count for the plain packmol box.
 - **New tables:** `Minimisation` (stages reached) and **`MinimisationChunks`** (energy and max force after every chunk) are written as the run goes, so a failure shows where it happened.
 
+### Hydroxide hydrogen given a Lennard-Jones core (v0.7.19)
+
+- **Run of 2026-11-12 13:00 (T4):** the box stayed clean (0 boundary contacts). The restrained minimisation ran away again (max force 3.1 × 10⁹ in chunk 2), and the new **RunawayForces** table named the two atoms: the chain-A bridging-hydroxide **H** (OX1 1503) and **Glu425 OE2**, a Zn2 ligand. All other atoms were below 4 × 10⁴.
+- **Cause:** GAFF gives the hydroxide H (type `ho`) no Lennard-Jones term. In the bonded zinc model, H–O(hydroxide)–Zn2–OE2 is a 1-4 pair, so the H feels a scaled Coulomb pull to the negative carboxylate oxygen with nothing to stop it. OpenMM stores 1-4 pairs as separate *exceptions*, which the v0.7.18 minimisation-only core (particle parameters) did not reach.
+- **Fix (permanent, for minimisation and dynamics):** hydrogens on an oxygen bonded to zinc get a small LJ core, r* = 0.6 Å and ε = 0.0157 kcal/mol (the ff14SB amide-H values), in both the particle parameters and their 1-4 exceptions (σ arithmetic mean, ε geometric mean / 2, as Amber does). The closest approach to a carboxylate O becomes ~1.5 Å (hydrogen-bond-like) instead of 0. The prmtop from tleap is unchanged; the change is applied when the OpenMM system is created and is in the saved `system.xml`. The run log and the provenance record list the atoms and the number of 1-4 pairs changed. Settings: `md.openmm.hydroxide_h_sigma_nm`, `hydroxide_h_epsilon_kj`.
+- Nothing needs rebuilding: packing and tleap are reused, and the minimisation restarts from the saved start coordinates.
+
 ### Box fixed; minimisation runaway guarded (v0.7.18)
 
 - **Run of 2026-11-12 12:00 (T4):**

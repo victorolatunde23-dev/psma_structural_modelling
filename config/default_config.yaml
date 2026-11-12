@@ -493,6 +493,8 @@ md:                             # Milestone 6: system setup (notebook 05)
     prerelax_iterations: 100      # per CPU round (~5–10 min each for ~535k atoms on 2 CPU cores)
     prerelax_rounds: 5
     prerelax_needed_above: 1.0e+9  # CPU pre-relaxation only if the start forces could overflow the GPU
+    hydroxide_h_sigma_nm: 0.1069   # LJ core for the zinc-bridging hydroxide H (GAFF ho has none): ff14SB amide-H values,
+    hydroxide_h_epsilon_kj: 0.0657  # r* 0.6 A, eps 0.0157 kcal/mol; also applied to its 1-4 pairs (permanent, not minimisation-only)
     min_chunk_gpu: 2000             # minimiser iterations between checkpoints (GPU)
     min_chunk_cpu: 200              # ... on the CPU (~5–15 min per chunk for ~535k atoms)
     min_max_chunks_gpu: 25

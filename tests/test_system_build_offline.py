@@ -489,3 +489,64 @@ def test_periodic_contacts():
                         "x": [0.05, 9.98, 5.0], "y": [5.0, 5.0, 5.0], "z": [5.0, 5.0, 5.0]})
     assert SB.periodic_contacts(env, [9.93, 20.0, 20.0]) == 1     # 0.05 and 9.98 touch through the boundary
     assert SB.periodic_contacts(env, [11.93, 20.0, 20.0]) == 0    # + 2 Å padding separates them
+
+
+def _fake_openmm_unit(monkeypatch):
+    """Just enough of openmm.unit for give_h_lj (OpenMM is only in the MD environment)."""
+    import types
+
+    class Q:
+        def __init__(self, v):
+            self.v = v
+
+        def value_in_unit(self, _):
+            return self.v
+
+    class U:
+        def __rmul__(self, v):
+            return Q(v)
+
+        def __pow__(self, _):
+            return self
+
+    unit = types.ModuleType("openmm.unit")
+    for n in ("nanometer", "kilojoule_per_mole", "elementary_charge"):
+        setattr(unit, n, U())
+    pkg = types.ModuleType("openmm")
+    pkg.unit = unit
+    monkeypatch.setitem(sys.modules, "openmm", pkg)
+    monkeypatch.setitem(sys.modules, "openmm.unit", unit)
+    return Q
+
+
+def test_hydroxide_h_gets_lj_in_particles_and_14_pairs(monkeypatch):
+    """The bridging-hydroxide H (zero LJ in GAFF) collapsed onto Glu425 OE2 through a 1-4 pair across the zinc:
+    its LJ core must reach the 1-4 exception, not only the particle (2026-11-12 runaway)."""
+    import types
+    Q = _fake_openmm_unit(monkeypatch)
+    el = {s: types.SimpleNamespace(symbol=s) for s in ("H", "O", "Zn", "C")}
+    names = [("ZN", "Zn"), ("O", "O"), ("H", "H"), ("OE2", "O"), ("CD", "C"), ("HG", "H"), ("OG", "O")]
+    atoms = [types.SimpleNamespace(index=i, name=n, element=el[e]) for i, (n, e) in enumerate(names)]
+    bonds = [(0, 1), (1, 2), (0, 3), (3, 4), (6, 5)]          # H-O-Zn-OE2-CD; a serine-like OG-HG (no zinc)
+    topo = types.SimpleNamespace(atoms=lambda: iter(atoms), bonds=lambda: [(atoms[a], atoms[b]) for a, b in bonds])
+    assert SB.metal_hydroxide_h(topo) == [2]
+
+    class NBF:
+        def __init__(self):
+            self.p = {i: [Q(0.4 if i == 2 else -0.8), Q(0.3), Q(0.0 if i in (2, 5) else 0.88)] for i in range(7)}
+            self.x = [[2, 3, Q(-0.27), Q(0.0), Q(0.0)],        # H...OE2 1-4 across the zinc: no LJ at all
+                      [1, 2, Q(0.0), Q(0.0), Q(0.0)],          # O-H exclusion
+                      [5, 4, Q(-0.2), Q(0.0), Q(0.0)]]         # unrelated
+        getParticleParameters = lambda self, i: tuple(self.p[i])
+        setParticleParameters = lambda self, i, q, s, e: self.p.__setitem__(i, [q, s, e])
+        getNumExceptions = lambda self: len(self.x)
+        getExceptionParameters = lambda self, k: tuple(self.x[k])
+        setExceptionParameters = lambda self, k, i, j, qq, s, e: self.x.__setitem__(k, [i, j, qq, s, e])
+
+    nbf = NBF()
+    info = SB.give_h_lj(nbf, [2], 0.1069, 0.0657)
+    assert info == {"hydroxide H given an LJ core": 1, "1-4 pairs updated": 1}
+    assert nbf.p[2][2].v == 0.0657 and nbf.p[5][2].v == 0.0           # only the hydroxide H changes
+    _, _, _, s, e = nbf.x[0]
+    assert abs(s.v - 0.5 * (0.1069 + 0.3)) < 1e-9 and abs(e.v - (0.0657 * 0.88) ** 0.5 / 2) < 1e-9
+    assert nbf.x[1][4].v == 0.0 and nbf.x[2][4].v == 0.0                # exclusions / other pairs untouched
