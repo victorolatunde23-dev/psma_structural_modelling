@@ -435,6 +435,11 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
   - New tables: **ZnR0Calibration** (rounds) and **ZnR0Shift** (the shift per bond).
   - Expected shifts are ~+0.2 to +0.4 Å for Zn2–Asp387 OD2, Zn2–Glu425 OE1/OE2 and Zn2–O(H), and smaller for the Zn1 bonds.
 - The next run resumes from the finished minimisation and only adds the calibration rounds, the checks and the 40 ps test.
+- **Result, run of 2026-11-12 18:50 (L4): MDReadiness READY.**
+  - Calibration converged in 2 rounds: max |crystal − minimised| 0.402 → 0.086 → 0.014 Å.
+  - r0 shifts (chain A / B): Zn2–Asp387 OD2 +0.32/+0.35, Zn2–O(H) +0.32/+0.34, Zn2–Glu425 OE1 +0.28/+0.23, OE2 +0.28/+0.26, Zn1–Asp453 OD2 +0.18/+0.19, Zn1–Asp387 OD1 +0.16/+0.15, Zn1–O(H) +0.07/+0.06, His377/His553 NE2 ≤ 0.05 Å.
+  - Max force 289 kJ/mol/nm; largest Zn change after minimisation 0.013 Å.
+  - 40 ps test: 300 K → 310.3 K, largest Zn change 0.16 Å, box stable.
 
 ### Constraint-aware force check; Zn pair diagnostic (v0.7.21)
 
