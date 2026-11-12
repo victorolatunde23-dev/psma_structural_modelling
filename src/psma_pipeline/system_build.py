@@ -436,6 +436,23 @@ def ring_piercings(env: pd.DataFrame, bond_max: float = 1.7, stats: dict | None 
     return remove
 
 
+def periodic_contacts(env: pd.DataFrame, box: list[float] | None, cut: float = 1.0) -> int:
+    """Atom pairs of different molecules closer than ``cut`` Å *through the periodic boundary* (box in Å)."""
+    from scipy.spatial import cKDTree
+
+    if not box or not len(env):
+        return 0
+    L = np.asarray(box, dtype=float)
+    X0 = env[["x", "y", "z"]].to_numpy()
+    X = np.mod(X0 - X0.min(0), L)
+    m = env["mol"].to_numpy()
+    pairs = cKDTree(X, boxsize=L).query_pairs(cut, output_type="ndarray")
+    if not len(pairs):
+        return 0
+    direct = np.linalg.norm(X0[pairs[:, 0]] - X0[pairs[:, 1]], axis=1) >= cut     # close only through the boundary
+    return int(((m[pairs[:, 0]] != m[pairs[:, 1]]) & direct).sum())
+
+
 def merge_with_membrane(sol: Solute, packed: pd.DataFrame, cryst: list[float] | None, clash: float = 2.0,
                         clash_h: float = 1.3) -> tuple[list[str], pd.DataFrame, dict]:
     """Superpose the solute on the packed protein, drop whole clashing molecules, return PDB lines and composition."""
@@ -651,7 +668,7 @@ def force_report(topology, forces_nm: np.ndarray, n: int = 15) -> pd.DataFrame:
 
 
 def cpu_prerelax(system, topology, positions, box, out: Path, threshold: float = 1e5, iterations: int = 200,
-                 rounds: int = 5):
+                 rounds: int = 5, needed_above: float = 1e9):
     """Relax the worst overlaps on the CPU (double precision) before minimising on the GPU.
 
     A freshly packed system can contain atoms so close that the first GPU minimisation steps overflow
@@ -674,6 +691,9 @@ def cpu_prerelax(system, topology, positions, box, out: Path, threshold: float =
     report = force_report(topology, F)
     report.to_csv(out / "start_forces.csv", index=False)
     done, f = 0, f0
+    if f0 <= needed_above:                      # nothing that could overflow the GPU: let the GPU minimise
+        return positions, report, {"max force at start (kJ/mol/nm)": f0, "CPU pre-relaxation rounds": 0,
+                                   "max force after CPU pre-relaxation (kJ/mol/nm)": f0}
     while f > threshold and done < rounds:
         mm.LocalEnergyMinimizer.minimize(ctx, 10.0 * u.kilojoule_per_mole / u.nanometer, iterations)
         done += 1
@@ -711,14 +731,15 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
     stage, pre = "prerelax", {}
     if ck_file.exists():
         ck = np.load(ck_file, allow_pickle=False)
-        if str(ck["key"]) == key and ck["positions"].shape == pos.shape:
+        if str(ck["key"]) == key and ck["positions"].shape == pos.shape and np.isfinite(ck["positions"]).all():
             stage, start_pos = str(ck["stage"]), ck["positions"] * u.nanometer
             pre = json.loads(str(ck["pre"]))
             log.info("resuming the minimisation at stage '%s' from %s", stage, ck_file.name)
     if stage == "prerelax":
         start_pos, start_report, pre = cpu_prerelax(
             system, prm.topology, crd.positions, crd.boxVectors, out, float(oc.get("prerelax_max_force", 1e5)),
-            int(oc.get("prerelax_iterations", 100)), int(oc.get("prerelax_rounds", 5)))
+            int(oc.get("prerelax_iterations", 100)), int(oc.get("prerelax_rounds", 5)),
+            float(oc.get("prerelax_needed_above", 1e9)))
         stage = "restrained"
 
     def save(stage_name, x_nm):
@@ -766,11 +787,12 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
             e = st.getPotentialEnergy().value_in_unit(u.kilojoule_per_mole)
             fmax = float(np.nanmax(np.linalg.norm(
                 st.getForces(asNumpy=True).value_in_unit(u.kilojoule_per_mole / u.nanometer), axis=1)))
-            save(stage_name, st.getPositions(asNumpy=True).value_in_unit(u.nanometer))
+            x_nm = st.getPositions(asNumpy=True).value_in_unit(u.nanometer)
             log.info("%s minimisation (%s) chunk %d: E = %.1f kJ/mol, max force %.1f kJ/mol/nm",
                      stage_name, platform_name, n, e, fmax)
-            if not np.isfinite(e):
+            if not np.isfinite(e) or not np.isfinite(x_nm).all():        # never save a broken state
                 raise RuntimeError(f"energy became {e} during the {stage_name} minimisation")
+            save(stage_name, x_nm)
             if fmax <= target or (last is not None and last - e < 10.0):
                 return n
             last = e
@@ -923,7 +945,12 @@ def run_system_build(cfg: Any, prepared_pdb: str | Path | None = None, zinc_dir:
     box_source = "CRYST1 of the packed PDB"
     if not cryst:                                # packmol-memgen's AMBER output has no CRYST1: use its box
         cryst = box_from_packmol_log(wd / "packmol-memgen.log")
-        box_source = "packmol-memgen box (log)"
+        # Packmol keeps every atom *inside* that box, so molecules on opposite faces touch through the periodic
+        # boundary (atoms ~0.0 Å apart: forces of 1e25 and NaN in the first run). Pad by the packing tolerance.
+        pad = float(s.get("box_padding", 2.0))
+        if cryst:
+            cryst = [round(v + pad, 3) for v in cryst]
+        box_source = f"packmol-memgen box (log) + {pad:g} Å periodic padding"
     if not cryst:
         X = pk[["x", "y", "z"]].to_numpy()
         cryst = [round(float(v), 3) for v in (X.max(0) - X.min(0))]
@@ -934,6 +961,11 @@ def run_system_build(cfg: Any, prepared_pdb: str | Path | None = None, zinc_dir:
 
     # ---- 3. merge and tleap -------------------------------------------------------------------------------------
     lines, comp, minfo = merge_with_membrane(sol, pk, cryst, float(s.get("clash_cutoff", 2.0)), float(s.get("clash_cutoff_h", 1.3)))
+    envpk = pk[~pk["resname"].isin(PROTEIN)]
+    minfo["contacts < 1 Å through the periodic boundary"] = periodic_contacts(envpk, cryst)
+    if "padding" in box_source:
+        unpadded = [v - float(s.get("box_padding", 2.0)) for v in cryst]
+        minfo["... with the unpadded packmol box"] = periodic_contacts(envpk, unpadded)
     sys_pdb = wd / "system.pdb"
     sys_pdb.write_text("\n".join(lines) + "\n")
     tables["Composition"] = composition_table(comp, cryst, str(s.get("lipids")), str(s.get("ratio")))

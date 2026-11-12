@@ -377,7 +377,7 @@ def test_no_cryst1_uses_packmol_box(cfg, tmp_path, fake_build_tools, monkeypatch
     wd.mkdir(parents=True)
     (wd / "packmol-memgen.log").write_text(" x_len = 90.0\n y_len = 90.0\n z_len = 100.0\n")
     res = SB.run_system_build(cfg, prepared_with_glycan(tmp_path / "p.pdb"), zinc_dir(tmp_path / "z"), IssueLog(), run_md=False)
-    assert "set sys box { 90.000 90.000 100.000 }" in (res.workdir / "build.in").read_text()
+    assert "set sys box { 92.000 92.000 102.000 }" in (res.workdir / "build.in").read_text()   # + 2 Å PBC padding
     assert "check sys" not in (res.workdir / "build.in").read_text()
     c = res.tables["SystemChecks"].set_index("Check")
     assert c.loc["periodic_box", "Status"] == "PASS" and "log" in c.loc["periodic_box", "Detail"]
@@ -477,3 +477,10 @@ def test_ring_piercing_detected():
     stats = {}
     assert SB.ring_piercings(pd.DataFrame(rows), stats=stats) == {1}
     assert stats["cholesterol ring piercings"] == 1 and stats["cholesterol rings checked"] == 1
+
+
+def test_periodic_contacts():
+    env = pd.DataFrame({"mol": [0, 1, 2], "resname": ["WAT"] * 3, "element": ["O"] * 3,
+                        "x": [0.05, 9.98, 5.0], "y": [5.0, 5.0, 5.0], "z": [5.0, 5.0, 5.0]})
+    assert SB.periodic_contacts(env, [9.93, 20.0, 20.0]) == 1     # 0.05 and 9.98 touch through the boundary
+    assert SB.periodic_contacts(env, [11.93, 20.0, 20.0]) == 0    # + 2 Å padding separates them

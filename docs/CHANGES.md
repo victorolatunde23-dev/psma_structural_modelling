@@ -399,3 +399,16 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
   - **restrained minimisation:** one 200-step chunk had finished (checkpoint saved 01:06) when the session ended.
 - The checkpoint is kept: the next GPU run **resumes** from these pre-relaxed coordinates instead of starting again.
 - `MINIMISE_ON_CPU` now defaults to **False** (build only without a GPU): at the measured speed a full CPU minimisation would take days.
+
+### Periodic box padding: the cause of the minimisation NaN (v0.7.16)
+
+- **Run of 2026-11-12 (T4, second account, 12 min):**
+  - **Build:** passed. 682 POPC + 294 CHL1, cholesterol 0.30; 0 ring piercings among 1,176 cholesterol rings checked; 179 lipid–lipid overlaps kept for minimisation.
+  - **Minimisation:** resumed from the CPU checkpoint, then failed on the GPU with `energy became nan`.
+- **Cause:** packmol keeps every atom *inside* its packing box, and the periodic box was set to exactly that box (161.0 × 161.0 × 203.7 Å from packmol-memgen's log). So molecules on opposite faces sat ~0 Å apart **through the periodic boundary**. Hence the 10²⁵ kJ/mol/nm start forces (StartForces), which neither the non-periodic overlap check nor 500 CPU steps could see or fix.
+- **Fixes:**
+  - **box = packmol box + `box_padding` (2.0 Å, the packing tolerance)** in x, y and z;
+  - MergeSummary reports the atom pairs closer than 1 Å through the boundary, for the padded and the unpadded box (`periodic_contacts`);
+  - a minimisation chunk with a non-finite energy or coordinates is **never saved** (the previous code saved before checking), and non-finite checkpoints are discarded;
+  - the CPU pre-relaxation now runs only when the start forces could overflow the GPU (> 10⁹ kJ/mol/nm), and stops below 10⁷.
+- The tleap build is redone (the box changed), and the old checkpoint no longer matches, so it is ignored automatically.
