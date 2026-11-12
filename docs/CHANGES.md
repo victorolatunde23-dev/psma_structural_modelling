@@ -424,6 +424,18 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Fix:** each box edge is now **max(packmol box, actual coordinate extent) + 2 Å**. No two atoms can then be closer than 2 Å through the boundary. MergeSummary reports which source set each axis, and the contact count for the plain packmol box.
 - **New tables:** `Minimisation` (stages reached) and **`MinimisationChunks`** (energy and max force after every chunk) are written as the run goes, so a failure shows where it happened.
 
+### Zinc bond-length correction (v0.7.22)
+
+- **Run of 2026-11-12 18:30 (L4), v0.7.21:**
+  - The constraint-aware force check passes: 365 kJ/mol/nm.
+  - **ZnPairs:** every Zn–ligand pair is correctly excluded from the nonbonded terms, and the r0/k values are exactly MCPB.py's. The contraction is a real pull, not a bug. The carboxylate and hydroxide oxygens feel 600–1,100 kJ/mol/nm towards the zinc along the bond, coming from the other Zn (+1.04/+1.07, ~3.4 Å away), the hydroxide (−1.07) and the second shell through 1-4 and longer-range terms. His NE2 (charge −0.23/−0.28) feels only 110–300 and stays at its crystal length.
+- **Decision (user, 2026-11-12, option 1):** correct the Zn bond lengths, so the site settles at the crystal geometry with the MCPB.py force constants and charges.
+  - After the unrestrained minimisation, each Zn–ligand r0 is shifted by (crystal r0 − minimised distance) and the system is minimised again, repeated until every distance is within `md.openmm.zn_r0_tolerance` (0.05 Å) of the crystal value, or for `zn_r0_rounds` (4) rounds. Each shift is capped at ±0.6 Å.
+  - The shifts are kept in `outputs/md_setup/system/zn_r0_correction.json` (tied to the prmtop hash) and applied whenever the OpenMM system is created. They are part of the saved `system.xml`, so equilibration and production use them.
+  - New tables: **ZnR0Calibration** (rounds) and **ZnR0Shift** (the shift per bond).
+  - Expected shifts are ~+0.2 to +0.4 Å for Zn2–Asp387 OD2, Zn2–Glu425 OE1/OE2 and Zn2–O(H), and smaller for the Zn1 bonds.
+- The next run resumes from the finished minimisation and only adds the calibration rounds, the checks and the 40 ps test.
+
 ### Constraint-aware force check; Zn pair diagnostic (v0.7.21)
 
 - **Run of 2026-11-12 18:00 (T4), v0.7.20, empirical Zn force constants:** k now 17.6–253.5 kcal/mol/Å² (Glu425 OE1 17.6, previously 0). Minimisation and the 40 ps test completed again. The Zn change after minimisation fell from 0.47 to 0.40 Å; Zn2 still draws in Asp387 OD2 (2.02 → 1.64 Å) and the hydroxide O (2.05 → 1.67 Å). At 310 K the deviations are smaller (Asp387 OD2 1.63–1.75 Å, Zn2–O(H) 1.77–1.81 Å, Glu425 OE1 back at 2.45 Å).

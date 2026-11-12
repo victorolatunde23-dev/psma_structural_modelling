@@ -497,6 +497,8 @@ md:                             # Milestone 6: system setup (notebook 05)
     prerelax_needed_above: 1.0e+9  # CPU pre-relaxation only if the start forces could overflow the GPU
     hydroxide_h_sigma_nm: 0.1069   # LJ core for the zinc-bridging hydroxide H (GAFF ho has none): ff14SB amide-H values,
     hydroxide_h_epsilon_kj: 0.0657  # r* 0.6 A, eps 0.0157 kcal/mol; also applied to its 1-4 pairs (permanent, not minimisation-only)
+    zn_r0_tolerance: 0.05      # Å; Zn bond-length correction stops when every minimised Zn–ligand distance is this close to the crystal
+    zn_r0_rounds: 4            # USER DECISION (2026-11-12, option 1): r0 shifted to offset the site's electrostatic pull
     min_chunk_gpu: 2000             # minimiser iterations between checkpoints (GPU)
     min_chunk_cpu: 200              # ... on the CPU (~5–15 min per chunk for ~535k atoms)
     min_max_chunks_gpu: 25

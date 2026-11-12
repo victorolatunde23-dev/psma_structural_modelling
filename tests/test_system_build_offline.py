@@ -560,3 +560,13 @@ def test_group_forces_remove_constraint_components():
     F = np.array([[2500.0, 0, 0], [-1250.0, 10, 0], [-1250.0, -10, 0], [300.0, 0, 0], [0, 0, 0]])
     g = np.linalg.norm(SB.group_forces(F, lab), axis=1)
     assert np.allclose(g, [0, 0, 0, 300, 0])
+
+
+def test_zn_r0_shift_update():
+    """Bonds pulled 0.4 Å short get r0 lengthened by 0.4 Å; a later round refines; the step is capped."""
+    tgt = np.array([2.035, 2.057, np.nan])
+    sh = SB.r0_shift_update(np.zeros(3), tgt, np.array([1.637, 1.675, 2.0]))
+    assert np.allclose(sh[:2], [0.398, 0.382]) and sh[2] == 0.0
+    sh2 = SB.r0_shift_update(sh, tgt, np.array([1.985, 2.10, 2.0]))
+    assert np.allclose(sh2[:2], [0.448, 0.339])
+    assert SB.r0_shift_update(np.zeros(3), tgt, np.array([1.0, 2.057, 2.0]))[0] == 0.6

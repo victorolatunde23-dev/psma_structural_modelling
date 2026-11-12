@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 
-__version__ = "0.7.21"
+__version__ = "0.7.22"
 
 from .config import Config, ConfigError, load_config  # noqa: E402
 

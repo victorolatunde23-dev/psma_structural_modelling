@@ -783,6 +783,15 @@ def zn_pair_report(system, topology, zn_pairs, x_nm) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def r0_shift_update(shift: np.ndarray, target: np.ndarray, d: np.ndarray, cap: float = 0.6) -> np.ndarray:
+    """One step of the Zn bond-length correction: lengthen (or shorten) each bond's r0 by how far the minimised
+    distance falls short of (or beyond) the crystal value. Capped so a bad step cannot run away."""
+    ok = np.isfinite(target) & np.isfinite(d)
+    new = shift.copy()
+    new[ok] = np.clip(shift[ok] + (target[ok] - d[ok]), -cap, cap)
+    return new
+
+
 def metal_hydroxide_h(topology) -> list[int]:
     """Indices of hydrogens on an oxygen that is bonded to a zinc (the bridging hydroxide's H)."""
     def is_zn(a):
@@ -861,6 +870,36 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
                         float(oc.get("hydroxide_h_epsilon_kj", 0.0657))) if oh_h else {}
     if oh_h:
         log.info("hydroxide H %s: %s", oh_h, oh_info)
+    # Zn bond-length correction (user decision 2026-11-12, option 1). In this binuclear site the other zinc, the
+    # hydroxide and the second shell pull the carboxylate oxygens in by 0.2–0.4 Å (ZnPairs: 700–1,100 kJ/mol/nm
+    # along the bonds), so with r0 = crystal the site settles too tight. r0 is shifted, self-consistently, until
+    # the minimised distances match the crystal (r0 as written by MCPB.py). The shifts are kept in
+    # zn_r0_correction.json and are part of the saved system.xml, for equilibration and production.
+    hbf = next(f for f in system.getForces() if isinstance(f, mm.HarmonicBondForce))
+    zn_atoms = {i for p in zn_pairs for i in p}
+    lookup = {}
+    for b in range(hbf.getNumBonds()):
+        i, j, _, _ = hbf.getBondParameters(b)
+        if i in zn_atoms and j in zn_atoms:
+            lookup[frozenset((i, j))] = b
+    zn_bond_idx = [lookup.get(frozenset(pr)) for pr in zn_pairs]
+    r0_target = np.array([hbf.getBondParameters(b)[2].value_in_unit(u.angstrom) if b is not None else np.nan
+                          for b in zn_bond_idx])
+    corr_file, prm_sha = out / "zn_r0_correction.json", sha256_file(prmtop)
+    shift = np.zeros(len(zn_pairs))
+    if corr_file.exists():
+        c = json.loads(corr_file.read_text())
+        if c.get("prmtop") == prm_sha and len(c.get("shift (Å)", [])) == len(zn_pairs):
+            shift = np.array(c["shift (Å)"], dtype=float)
+
+    def apply_shift(sh, context=None):
+        for b, t, dv in zip(zn_bond_idx, r0_target, sh):
+            if b is not None:
+                i, j, _, kb = hbf.getBondParameters(b)
+                hbf.setBondParameters(b, i, j, (t + dv) * u.angstrom, kb)
+        if context is not None:
+            hbf.updateParametersInContext(context)
+    apply_shift(shift)
     soft_core = []
     sig_min = float(oc.get("min_bare_h_sigma_nm", 0.1)) * u.nanometer
     eps_min = float(oc.get("min_bare_h_epsilon_kj", 0.01)) * u.kilojoule_per_mole
@@ -882,7 +921,7 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
             log.info("resuming the minimisation at stage '%s' from %s", stage, ck_file.name)
     if stage == "prerelax":                         # a fresh start: drop diagnostics left by an earlier system
         for f in ("runaway_forces.csv", "minimisation_chunks.csv", "minimisation_progress.csv", "final_forces.csv",
-                  "zn_pairs.csv"):
+                  "zn_pairs.csv", "zn_r0_calibration.csv"):
             (out / f).unlink(missing_ok=True)
         start_pos, start_report, pre = cpu_prerelax(
             system, prm.topology, crd.positions, crd.boxVectors, out, float(oc.get("prerelax_max_force", 1e5)),
@@ -969,6 +1008,31 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
     sim.context.setParameter("k_rest", 0.0)
     if stage == "unrestrained":
         pre["unrestrained minimisation chunks"] = minimise("unrestrained")
+        stage = "zn_calibration"
+        save(stage, sim.context.getState(getPositions=True).getPositions(asNumpy=True).value_in_unit(u.nanometer))
+    if stage == "done" and zn_pairs and "Zn r0 calibration rounds" not in pre:
+        stage = "zn_calibration"                     # minimised before the correction existed: calibrate now
+    if stage == "zn_calibration":
+        tol, rounds = float(oc.get("zn_r0_tolerance", 0.05)), int(oc.get("zn_r0_rounds", 4))
+        cal = []
+        for rnd in range(rounds + 1):
+            d = distances(sim.context.getState(getPositions=True).getPositions(asNumpy=True).value_in_unit(u.nanometer), zn_pairs)
+            dev = r0_target - d
+            cal.append({"Round": rnd, "Max |crystal − minimised| (Å)": round(float(np.nanmax(np.abs(dev))), 3),
+                        "Max r0 shift (Å)": round(float(np.max(np.abs(shift))), 3),
+                        "Distances (Å)": ", ".join(f"{v:.2f}" for v in d)})
+            log.info("Zn r0 calibration round %d: max deviation %.3f Å, max shift %.3f Å", rnd,
+                     float(np.nanmax(np.abs(dev))), float(np.max(np.abs(shift))))
+            if np.nanmax(np.abs(dev)) <= tol or rnd == rounds:
+                break
+            shift = r0_shift_update(shift, r0_target, d)
+            apply_shift(shift, sim.context)
+            corr_file.write_text(json.dumps({"prmtop": prm_sha, "pairs": [list(map(int, pr)) for pr in zn_pairs],
+                                             "crystal r0 (Å)": r0_target.tolist(), "shift (Å)": shift.tolist()}, indent=1))
+            minimise(f"Zn r0 calibration {rnd + 1}")
+        pd.DataFrame(cal).to_csv(out / "zn_r0_calibration.csv", index=False)
+        pre["Zn r0 calibration rounds"] = len(cal) - 1
+        pre["max Zn r0 shift (Å)"] = round(float(np.max(np.abs(shift))), 3)
         stage = "done"
         save(stage, sim.context.getState(getPositions=True).getPositions(asNumpy=True).value_in_unit(u.nanometer))
     x_min = snap("minimised (unrestrained)")
@@ -1204,6 +1268,12 @@ def run_system_build(cfg: Any, prepared_pdb: str | Path | None = None, zinc_dir:
             tables["MinimisationChunks"] = pd.read_csv(wd / "minimisation_chunks.csv")
         if (wd / "runaway_forces.csv").exists():
             tables["RunawayForces"] = pd.read_csv(wd / "runaway_forces.csv")
+        if (wd / "zn_r0_calibration.csv").exists():
+            tables["ZnR0Calibration"] = pd.read_csv(wd / "zn_r0_calibration.csv")
+        if (wd / "zn_r0_correction.json").exists():
+            c = json.loads((wd / "zn_r0_correction.json").read_text())
+            tables["ZnR0Shift"] = pd.DataFrame({"Pair (atom indices)": [str(x) for x in c["pairs"]],
+                                                "Crystal r0 (Å)": c["crystal r0 (Å)"], "r0 shift (Å)": c["shift (Å)"]})
         if (wd / "zn_pairs.csv").exists():
             tables["ZnPairs"] = pd.read_csv(wd / "zn_pairs.csv")
         if (wd / "final_forces.csv").exists():
