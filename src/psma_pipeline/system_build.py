@@ -772,10 +772,14 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
                      "Zn–ligand distances (Å)": ", ".join(f"{v:.2f}" for v in d), "_d": d,
                      "Temperature (K)": None, "Box (Å)": ", ".join(f"{10 * v:.1f}" for v in
                                                                   np.diag(st.getPeriodicBoxVectors(asNumpy=True).value_in_unit(u.nanometer)))})
+        pd.DataFrame([{k: v for k, v in r.items() if k != "_d"} for r in rows]).to_csv(
+            out / "minimisation_progress.csv", index=False)          # kept even if a later stage fails
         return x
 
     tol = float(oc.get("min_tolerance", 10.0)) * u.kilojoule_per_mole / u.nanometer
     target = float(oc.get("max_force_ok", 1000.0)) * float(oc.get("min_target_fraction", 0.5))
+
+    chunks: list = []
 
     def minimise(stage_name):
         """Minimise in chunks, saving after each; stop when the largest force is below the target or the energy
@@ -790,6 +794,9 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
             x_nm = st.getPositions(asNumpy=True).value_in_unit(u.nanometer)
             log.info("%s minimisation (%s) chunk %d: E = %.1f kJ/mol, max force %.1f kJ/mol/nm",
                      stage_name, platform_name, n, e, fmax)
+            chunks.append({"Stage": stage_name, "Chunk": n, "Platform": platform_name,
+                           "Potential energy (kJ/mol)": e, "Max force (kJ/mol/nm)": fmax})
+            pd.DataFrame(chunks).to_csv(out / "minimisation_chunks.csv", index=False)
             if not np.isfinite(e) or not np.isfinite(x_nm).all():        # never save a broken state
                 raise RuntimeError(f"energy became {e} during the {stage_name} minimisation")
             save(stage_name, x_nm)
@@ -947,14 +954,22 @@ def run_system_build(cfg: Any, prepared_pdb: str | Path | None = None, zinc_dir:
         cryst = box_from_packmol_log(wd / "packmol-memgen.log")
         # Packmol keeps every atom *inside* that box, so molecules on opposite faces touch through the periodic
         # boundary (atoms ~0.0 Å apart: forces of 1e25 and NaN in the first run). Pad by the packing tolerance.
+        # An incomplete packing also leaves atoms *outside* that box (constraint violations), so the box is the
+        # larger of the packmol box and the actual coordinate extent, plus the padding on each axis: then no two
+        # atoms can be closer than the padding through the boundary.
         pad = float(s.get("box_padding", 2.0))
+        ext = pk[["x", "y", "z"]].to_numpy()
+        ext = ext.max(0) - ext.min(0)
         if cryst:
-            cryst = [round(v + pad, 3) for v in cryst]
-        box_source = f"packmol-memgen box (log) + {pad:g} Å periodic padding"
+            src = ["log" if b >= e else "extent" for b, e in zip(cryst, ext)]
+            cryst = [round(max(b, float(e)) + pad, 3) for b, e in zip(cryst, ext)]
+            box_source = (f"max(packmol-memgen box, coordinate extent) + {pad:g} Å periodic padding "
+                          f"(x/y/z from {'/'.join(src)})")
     if not cryst:
         X = pk[["x", "y", "z"]].to_numpy()
-        cryst = [round(float(v), 3) for v in (X.max(0) - X.min(0))]
-        box_source = "coordinate extent of the packed system"
+        pad = float(s.get("box_padding", 2.0))
+        cryst = [round(float(v) + pad, 3) for v in (X.max(0) - X.min(0))]
+        box_source = f"coordinate extent of the packed system + {pad:g} Å periodic padding"
         issues.add("system", Status.WARNING, f"no box in the packed PDB or log: using the coordinate extent {cryst} Å")
     _step(prov, "membrane packing", "packmol-memgen (protein only, pre-oriented)", [prot_pdb], [packed],
           {**pack_params, "reused": reuse})
@@ -963,9 +978,9 @@ def run_system_build(cfg: Any, prepared_pdb: str | Path | None = None, zinc_dir:
     lines, comp, minfo = merge_with_membrane(sol, pk, cryst, float(s.get("clash_cutoff", 2.0)), float(s.get("clash_cutoff_h", 1.3)))
     envpk = pk[~pk["resname"].isin(PROTEIN)]
     minfo["contacts < 1 Å through the periodic boundary"] = periodic_contacts(envpk, cryst)
-    if "padding" in box_source:
-        unpadded = [v - float(s.get("box_padding", 2.0)) for v in cryst]
-        minfo["... with the unpadded packmol box"] = periodic_contacts(envpk, unpadded)
+    log_box = box_from_packmol_log(wd / "packmol-memgen.log")
+    if log_box:
+        minfo["... with the plain packmol box"] = periodic_contacts(envpk, log_box)
     sys_pdb = wd / "system.pdb"
     sys_pdb.write_text("\n".join(lines) + "\n")
     tables["Composition"] = composition_table(comp, cryst, str(s.get("lipids")), str(s.get("ratio")))
@@ -1016,6 +1031,10 @@ def run_system_build(cfg: Any, prepared_pdb: str | Path | None = None, zinc_dir:
             issues.add("system", Status.FAIL, f"OpenMM minimisation failed: {ex}")
         if (wd / "start_forces.csv").exists():                 # the most strained atoms, also when it failed
             tables["StartForces"] = pd.read_csv(wd / "start_forces.csv")
+        if "Minimisation" not in tables and (wd / "minimisation_progress.csv").exists():
+            tables["Minimisation"] = pd.read_csv(wd / "minimisation_progress.csv")
+        if (wd / "minimisation_chunks.csv").exists():
+            tables["MinimisationChunks"] = pd.read_csv(wd / "minimisation_chunks.csv")
     after = {p: sha256_file(Path(p)) for p in originals}
     tables["SystemChecks"] = system_checks(tables, lg, md, originals, after, cfg)
     tables["MDReadiness"] = md_readiness(tables, cfg)

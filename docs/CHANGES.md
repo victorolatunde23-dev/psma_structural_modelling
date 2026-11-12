@@ -412,3 +412,14 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
   - a minimisation chunk with a non-finite energy or coordinates is **never saved** (the previous code saved before checking), and non-finite checkpoints are discarded;
   - the CPU pre-relaxation now runs only when the start forces could overflow the GPU (> 10⁹ kJ/mol/nm), and stops below 10⁷.
 - The tleap build is redone (the box changed), and the old checkpoint no longer matches, so it is ignored automatically.
+
+### Box from the real coordinate extent (v0.7.17)
+
+- **Run of 2026-11-12 11:00 (T4, 36 min):**
+  - **Periodic-boundary contacts:** the diagnosis was confirmed. With the plain packmol box, **3,248** atom pairs were closer than 1 Å through the periodic boundary; with +2 Å padding, 1,006 remained.
+  - **Start forces:** the largest fell from 9×10²⁵ to 9×10²¹ kJ/mol/nm.
+  - **Restrained minimisation:** completed.
+  - **Unrestrained minimisation:** NaN.
+- **Why padding was not enough:** the 30-loop packing did not converge, and packmol reported constraint violations of ~100. So some atoms lie *outside* the packmol box, and padding the nominal box still lets them meet their periodic images.
+- **Fix:** each box edge is now **max(packmol box, actual coordinate extent) + 2 Å**. No two atoms can then be closer than 2 Å through the boundary. MergeSummary reports which source set each axis, and the contact count for the plain packmol box.
+- **New tables:** `Minimisation` (stages reached) and **`MinimisationChunks`** (energy and max force after every chunk) are written as the run goes, so a failure shows where it happened.

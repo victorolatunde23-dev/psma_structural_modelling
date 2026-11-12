@@ -377,7 +377,12 @@ def test_no_cryst1_uses_packmol_box(cfg, tmp_path, fake_build_tools, monkeypatch
     wd.mkdir(parents=True)
     (wd / "packmol-memgen.log").write_text(" x_len = 90.0\n y_len = 90.0\n z_len = 100.0\n")
     res = SB.run_system_build(cfg, prepared_with_glycan(tmp_path / "p.pdb"), zinc_dir(tmp_path / "z"), IssueLog(), run_md=False)
-    assert "set sys box { 92.000 92.000 102.000 }" in (res.workdir / "build.in").read_text()   # + 2 Å PBC padding
+    import re
+    m = re.search(r"set sys box \{ ([\d.]+) ([\d.]+) ([\d.]+) \}", (res.workdir / "build.in").read_text())
+    box = [float(v) for v in m.groups()]
+    pk = SB.read_pdb_molecules(res.workdir / "packed.pdb")[0][["x", "y", "z"]].to_numpy()
+    ext = pk.max(0) - pk.min(0)
+    assert box == pytest.approx([max(b, e) + 2.0 for b, e in zip([90.0, 90.0, 100.0], ext)], abs=1e-3)
     assert "check sys" not in (res.workdir / "build.in").read_text()
     c = res.tables["SystemChecks"].set_index("Check")
     assert c.loc["periodic_box", "Status"] == "PASS" and "log" in c.loc["periodic_box", "Detail"]
