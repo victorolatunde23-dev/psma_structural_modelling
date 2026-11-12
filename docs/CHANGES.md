@@ -423,3 +423,15 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Why padding was not enough:** the 30-loop packing did not converge, and packmol reported constraint violations of ~100. So some atoms lie *outside* the packmol box, and padding the nominal box still lets them meet their periodic images.
 - **Fix:** each box edge is now **max(packmol box, actual coordinate extent) + 2 Å**. No two atoms can then be closer than 2 Å through the boundary. MergeSummary reports which source set each axis, and the contact count for the plain packmol box.
 - **New tables:** `Minimisation` (stages reached) and **`MinimisationChunks`** (energy and max force after every chunk) are written as the run goes, so a failure shows where it happened.
+
+### Box fixed; minimisation runaway guarded (v0.7.18)
+
+- **Run of 2026-11-12 12:00 (T4):**
+  - **Box:** 171.8 × 171.7 × 206.4 Å, set from the coordinate extent on every axis. **0** contacts < 1 Å through the boundary (3,249 with the plain packmol box), so the periodic problem is solved.
+  - **Start:** E = 1.04 × 10⁷ kJ/mol and max force 6.2 × 10⁵ kJ/mol/nm (was 10²¹–10²⁵).
+  - **Restrained minimisation:** chunk 2 reached E = −6.15 × 10⁶ kJ/mol with max force 1.3 × 10⁵. Then the max force *rose* chunk after chunk (3 × 10⁷ → 3.7 × 10⁹, the GPU force limit) while the energy kept falling (−7.6 × 10⁷), and chunk 8 was NaN. That is the signature of a charge collapse: a charged atom with no Lennard-Jones repulsion falling onto an opposite charge.
+- **Fixes:**
+  - **During minimisation only**, charged hydrogens with zero LJ get a tiny repulsive core (σ 0.1 nm, ε 0.01 kJ/mol). These are hydroxyl, water and hydroxide H (GAFF `ho`, ff14SB `HO`, TIP3P). The real parameters are restored before any dynamics and in the saved `system.xml`.
+  - Chunks with runaway forces (> 10⁷) are never checkpointed; the run stops with a clear message above 10⁹ instead of reaching NaN; and the atoms involved are written to `runaway_forces.csv` (table **RunawayForces**).
+  - The checkpoint key is versioned (`v2`), so the collapsed state saved by the failed run is ignored.
+  - The notebook 05 plot no longer fails when a run stops early; it shows MinimisationChunks and RunawayForces.

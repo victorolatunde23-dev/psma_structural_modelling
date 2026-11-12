@@ -725,9 +725,23 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
     for i in protein_heavy_idx:
         rest.addParticle(i, pos[i].tolist())
     system.addForce(rest)
+    # Minimisation only: charged atoms without any Lennard-Jones repulsion (hydroxyl / water / hydroxide H) can
+    # collapse onto an opposite charge while a strained system is being relaxed (energy plunging, forces up to
+    # the GPU's limit, then NaN: run of 2026-11-12). Give them a tiny repulsive core during minimisation only;
+    # the original parameters are restored before any dynamics and in the saved system.
+    nbf = next(f for f in system.getForces() if isinstance(f, mm.NonbondedForce))
+    soft_core = []
+    sig_min = float(oc.get("min_bare_h_sigma_nm", 0.1)) * u.nanometer
+    eps_min = float(oc.get("min_bare_h_epsilon_kj", 0.01)) * u.kilojoule_per_mole
+    is_h = [a.element is not None and a.element.symbol == "H" for a in prm.topology.atoms()]
+    for i in range(nbf.getNumParticles()):
+        q, sig, eps = nbf.getParticleParameters(i)
+        if is_h[i] and eps.value_in_unit(u.kilojoule_per_mole) == 0.0 and abs(q.value_in_unit(u.elementary_charge)) > 0:
+            soft_core.append((i, q, sig, eps))
+            nbf.setParticleParameters(i, q, sig_min, eps_min)
     # resumable: the minimisation saves its coordinates to the work folder (Drive) after every chunk
     ck_file = out / "minimise_checkpoint.npz"
-    key = f"{sha256_file(prmtop)}:{sha256_file(inpcrd)}"
+    key = f"v2:{sha256_file(prmtop)}:{sha256_file(inpcrd)}"   # v2: older checkpoints may hold collapsed states
     stage, pre = "prerelax", {}
     if ck_file.exists():
         ck = np.load(ck_file, allow_pickle=False)
@@ -799,7 +813,15 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
             pd.DataFrame(chunks).to_csv(out / "minimisation_chunks.csv", index=False)
             if not np.isfinite(e) or not np.isfinite(x_nm).all():        # never save a broken state
                 raise RuntimeError(f"energy became {e} during the {stage_name} minimisation")
-            save(stage_name, x_nm)
+            if fmax <= float(oc.get("runaway_force", 1e7)):              # nor a state with runaway forces
+                save(stage_name, x_nm)
+            if fmax > float(oc.get("runaway_force", 1e7)):          # name the atoms if forces run away
+                force_report(prm.topology, st.getForces(asNumpy=True).value_in_unit(
+                    u.kilojoule_per_mole / u.nanometer)).assign(Stage=stage_name, Chunk=n).to_csv(
+                    out / "runaway_forces.csv", index=False)
+                if fmax > 1e9:                                           # stop before the GPU force overflow
+                    raise RuntimeError(f"forces ran away during the {stage_name} minimisation (max {fmax:.3g} "
+                                       "kJ/mol/nm): see RunawayForces for the atoms involved")
             if fmax <= target or (last is not None and last - e < 10.0):
                 return n
             last = e
@@ -819,6 +841,11 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
     x_min = snap("minimised (unrestrained)")
     with open(out / "system_minimised.pdb", "w") as fh:
         app.PDBFile.writeFile(prm.topology, x_min * u.nanometer, fh, keepIds=True)
+    for i, q, sig, eps in soft_core:                         # back to the real force field
+        nbf.setParticleParameters(i, q, sig, eps)
+    if soft_core:
+        nbf.updateParametersInContext(sim.context)
+    pre["charged atoms given a minimisation-only repulsive core"] = len(soft_core)
     smoke = list(oc.get("smoke_ps") or [])
     if smoke and platform_name in ("CUDA", "OpenCL"):
         sim.context.setParameter("k_rest", k)
@@ -1035,6 +1062,8 @@ def run_system_build(cfg: Any, prepared_pdb: str | Path | None = None, zinc_dir:
             tables["Minimisation"] = pd.read_csv(wd / "minimisation_progress.csv")
         if (wd / "minimisation_chunks.csv").exists():
             tables["MinimisationChunks"] = pd.read_csv(wd / "minimisation_chunks.csv")
+        if (wd / "runaway_forces.csv").exists():
+            tables["RunawayForces"] = pd.read_csv(wd / "runaway_forces.csv")
     after = {p: sha256_file(Path(p)) for p in originals}
     tables["SystemChecks"] = system_checks(tables, lg, md, originals, after, cfg)
     tables["MDReadiness"] = md_readiness(tables, cfg)
