@@ -705,6 +705,84 @@ def cpu_prerelax(system, topology, positions, box, out: Path, threshold: float =
                          "max force after CPU pre-relaxation (kJ/mol/nm)": f}
 
 
+def constraint_labels(n: int, pairs) -> np.ndarray:
+    """Atom -> rigid-group label from the constraint pairs (union-find); unconstrained atoms are their own group."""
+    parent = np.arange(n)
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    for i, j in pairs:
+        ri, rj = find(int(i)), find(int(j))
+        if ri != rj:
+            parent[max(ri, rj)] = min(ri, rj)
+    return np.array([find(i) for i in range(n)])
+
+
+def group_forces(F: np.ndarray, labels: np.ndarray) -> np.ndarray:
+    """Per-atom force with constrained groups replaced by their net force (what can actually move them).
+
+    With rigid water and X–H bonds constrained, a raw atomic force also contains the part along the constraint,
+    which the constraint cancels: a hydrogen-bonded water oxygen shows ~2,000–3,000 kJ/mol/nm even in a fully
+    minimised box. The run of 2026-11-12 18:00 failed the force check on exactly that (all 15 largest forces
+    were bulk-water oxygens). The net force on each rigid group does not include it."""
+    G = np.zeros_like(F)
+    np.add.at(G, labels, F)
+    return G[labels]
+
+
+def zn_pair_report(system, topology, zn_pairs, x_nm) -> pd.DataFrame:
+    """For each Zn–ligand bond: what the OpenMM system holds (bond r0/k, whether the pair is excluded from
+    the nonbonded terms, the charges) and the net nonbonded force pulling the ligand atom along the bond.
+
+    Written because Zn2 kept drawing in Asp387 OD2 and the hydroxide O by ~0.4 Å with both Seminario and
+    empirical force constants: this shows whether a bonded pair is missing its exclusion or what pulls."""
+    import openmm as mm
+    import openmm.unit as u
+    atoms = list(topology.atoms())
+    nbf = next(f for f in system.getForces() if isinstance(f, mm.NonbondedForce))
+    bonds = {}
+    for f in system.getForces():
+        if isinstance(f, mm.HarmonicBondForce):
+            for b in range(f.getNumBonds()):
+                i, j, r0, k = f.getBondParameters(b)
+                bonds[frozenset((i, j))] = (r0.value_in_unit(u.angstrom), k.value_in_unit(u.kilocalorie_per_mole / u.angstrom ** 2) / 2)
+    exc = {}
+    for e in range(nbf.getNumExceptions()):
+        i, j, qq, sig, eps = nbf.getExceptionParameters(e)
+        exc[frozenset((i, j))] = (qq.value_in_unit(u.elementary_charge ** 2), eps.value_in_unit(u.kilojoule_per_mole))
+    # nonbonded force on each ligand atom (NonbondedForce alone, its own force group)
+    groups = {f: f.getForceGroup() for f in system.getForces()}
+    for f in system.getForces():
+        f.setForceGroup(0)
+    nbf.setForceGroup(31)
+    ctx = mm.Context(system, mm.VerletIntegrator(0.001), mm.Platform.getPlatformByName("Reference")
+                     if system.getNumParticles() < 5000 else mm.Platform.getPlatformByName("CPU"))
+    ctx.setPositions(x_nm * u.nanometer)
+    F = ctx.getState(getForces=True, groups={31}).getForces(asNumpy=True).value_in_unit(u.kilojoule_per_mole / u.nanometer)
+    del ctx
+    for f, g in groups.items():
+        f.setForceGroup(g)
+    rows = []
+    for a, b in zn_pairs:
+        zn, lig = (a, b) if atoms[a].name.upper().startswith("ZN") else (b, a)
+        v = x_nm[zn] - x_nm[lig]
+        r = float(np.linalg.norm(v))
+        r0k = bonds.get(frozenset((zn, lig)), (None, None))
+        e = exc.get(frozenset((zn, lig)))
+        qz, ql = nbf.getParticleParameters(zn)[0], nbf.getParticleParameters(lig)[0]
+        rows.append({"Zn": f"{atoms[zn].residue.name}{atoms[zn].residue.index + 1}:{atoms[zn].name}",
+                     "Ligand": f"{atoms[lig].residue.name}{atoms[lig].residue.index + 1}:{atoms[lig].name}",
+                     "Distance (Å)": round(10 * r, 3), "Bond r0 (Å)": r0k[0], "Bond k (kcal/mol/Å²)": r0k[1],
+                     "Excluded from nonbonded": e is not None and e[0] == 0.0 and e[1] == 0.0,
+                     "Zn charge": round(qz.value_in_unit(u.elementary_charge), 3),
+                     "Ligand charge": round(ql.value_in_unit(u.elementary_charge), 3),
+                     "Nonbonded pull on ligand towards Zn (kJ/mol/nm)": round(float(F[lig] @ (v / r)), 1)})
+    return pd.DataFrame(rows)
+
+
 def metal_hydroxide_h(topology) -> list[int]:
     """Indices of hydrogens on an oxygen that is bonded to a zinc (the bridging hydroxide's H)."""
     def is_zn(a):
@@ -776,6 +854,8 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
     # the GPU's limit, then NaN: run of 2026-11-12). Give them a tiny repulsive core during minimisation only;
     # the original parameters are restored before any dynamics and in the saved system.
     nbf = next(f for f in system.getForces() if isinstance(f, mm.NonbondedForce))
+    labels = constraint_labels(system.getNumParticles(), [system.getConstraintParameters(c)[:2]
+                                                         for c in range(system.getNumConstraints())])
     oh_h = metal_hydroxide_h(prm.topology)
     oh_info = give_h_lj(nbf, oh_h, float(oc.get("hydroxide_h_sigma_nm", 0.1069)),
                         float(oc.get("hydroxide_h_epsilon_kj", 0.0657))) if oh_h else {}
@@ -801,7 +881,8 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
             pre = json.loads(str(ck["pre"]))
             log.info("resuming the minimisation at stage '%s' from %s", stage, ck_file.name)
     if stage == "prerelax":                         # a fresh start: drop diagnostics left by an earlier system
-        for f in ("runaway_forces.csv", "minimisation_chunks.csv", "minimisation_progress.csv", "final_forces.csv"):
+        for f in ("runaway_forces.csv", "minimisation_chunks.csv", "minimisation_progress.csv", "final_forces.csv",
+                  "zn_pairs.csv"):
             (out / f).unlink(missing_ok=True)
         start_pos, start_report, pre = cpu_prerelax(
             system, prm.topology, crd.positions, crd.boxVectors, out, float(oc.get("prerelax_max_force", 1e5)),
@@ -829,7 +910,7 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
     def snap(stage):
         st = sim.context.getState(getEnergy=True, getPositions=True, getForces=True)
         e = st.getPotentialEnergy().value_in_unit(u.kilojoule_per_mole)
-        f = np.linalg.norm(st.getForces(asNumpy=True).value_in_unit(u.kilojoule_per_mole / u.nanometer), axis=1)
+        f = np.linalg.norm(group_forces(st.getForces(asNumpy=True).value_in_unit(u.kilojoule_per_mole / u.nanometer), labels), axis=1)
         x = st.getPositions(asNumpy=True).value_in_unit(u.nanometer)
         d = distances(x, zn_pairs) if zn_pairs else np.array([])
         rmsd = float(np.sqrt(np.mean(np.sum((x[protein_heavy_idx] - pos[protein_heavy_idx]) ** 2, axis=1)))) * 10
@@ -856,8 +937,8 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
             mm.LocalEnergyMinimizer.minimize(sim.context, tol, chunk)
             st = sim.context.getState(getEnergy=True, getForces=True, getPositions=True)
             e = st.getPotentialEnergy().value_in_unit(u.kilojoule_per_mole)
-            fmax = float(np.nanmax(np.linalg.norm(
-                st.getForces(asNumpy=True).value_in_unit(u.kilojoule_per_mole / u.nanometer), axis=1)))
+            F_now = group_forces(st.getForces(asNumpy=True).value_in_unit(u.kilojoule_per_mole / u.nanometer), labels)
+            fmax = float(np.nanmax(np.linalg.norm(F_now, axis=1)))
             x_nm = st.getPositions(asNumpy=True).value_in_unit(u.nanometer)
             log.info("%s minimisation (%s) chunk %d: E = %.1f kJ/mol, max force %.1f kJ/mol/nm",
                      stage_name, platform_name, n, e, fmax)
@@ -869,8 +950,7 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
             if fmax <= float(oc.get("runaway_force", 1e7)):              # nor a state with runaway forces
                 save(stage_name, x_nm)
             if fmax > float(oc.get("runaway_force", 1e7)):          # name the atoms if forces run away
-                force_report(prm.topology, st.getForces(asNumpy=True).value_in_unit(
-                    u.kilojoule_per_mole / u.nanometer)).assign(Stage=stage_name, Chunk=n).to_csv(
+                force_report(prm.topology, F_now).assign(Stage=stage_name, Chunk=n).to_csv(
                     out / "runaway_forces.csv", index=False)
                 if fmax > 1e9:                                           # stop before the GPU force overflow
                     raise RuntimeError(f"forces ran away during the {stage_name} minimisation (max {fmax:.3g} "
@@ -892,8 +972,12 @@ def run_openmm(cfg: Any, prmtop: Path, inpcrd: Path, zn_pairs: list[tuple[int, i
         stage = "done"
         save(stage, sim.context.getState(getPositions=True).getPositions(asNumpy=True).value_in_unit(u.nanometer))
     x_min = snap("minimised (unrestrained)")
-    force_report(prm.topology, sim.context.getState(getForces=True).getForces(asNumpy=True).value_in_unit(
-        u.kilojoule_per_mole / u.nanometer)).to_csv(out / "final_forces.csv", index=False)   # what is left after minimising
+    try:
+        zn_pair_report(system, prm.topology, zn_pairs, x_min).to_csv(out / "zn_pairs.csv", index=False)
+    except Exception as ex:  # noqa: BLE001  (a diagnostic must not stop the run)
+        log.warning("Zn pair report failed: %s", ex)
+    force_report(prm.topology, group_forces(sim.context.getState(getForces=True).getForces(asNumpy=True).value_in_unit(
+        u.kilojoule_per_mole / u.nanometer), labels)).to_csv(out / "final_forces.csv", index=False)   # what is left after minimising
     with open(out / "system_minimised.pdb", "w") as fh:
         app.PDBFile.writeFile(prm.topology, x_min * u.nanometer, fh, keepIds=True)
     for i, q, sig, eps in soft_core:                         # back to the real force field
@@ -1120,6 +1204,8 @@ def run_system_build(cfg: Any, prepared_pdb: str | Path | None = None, zinc_dir:
             tables["MinimisationChunks"] = pd.read_csv(wd / "minimisation_chunks.csv")
         if (wd / "runaway_forces.csv").exists():
             tables["RunawayForces"] = pd.read_csv(wd / "runaway_forces.csv")
+        if (wd / "zn_pairs.csv").exists():
+            tables["ZnPairs"] = pd.read_csv(wd / "zn_pairs.csv")
         if (wd / "final_forces.csv").exists():
             tables["FinalForces"] = pd.read_csv(wd / "final_forces.csv")
     after = {p: sha256_file(Path(p)) for p in originals}

@@ -550,3 +550,13 @@ def test_hydroxide_h_gets_lj_in_particles_and_14_pairs(monkeypatch):
     _, _, _, s, e = nbf.x[0]
     assert abs(s.v - 0.5 * (0.1069 + 0.3)) < 1e-9 and abs(e.v - (0.0657 * 0.88) ** 0.5 / 2) < 1e-9
     assert nbf.x[1][4].v == 0.0 and nbf.x[2][4].v == 0.0                # exclusions / other pairs untouched
+
+
+def test_group_forces_remove_constraint_components():
+    """A rigid water held in place by its constraints: large atomic forces that cancel net (the 2026-11-12 'max
+    force 2,793' were all bulk-water oxygens) must not count; a free atom keeps its own force."""
+    lab = SB.constraint_labels(5, [(0, 1), (0, 2), (1, 2)])
+    assert list(lab) == [0, 0, 0, 3, 4]
+    F = np.array([[2500.0, 0, 0], [-1250.0, 10, 0], [-1250.0, -10, 0], [300.0, 0, 0], [0, 0, 0]])
+    g = np.linalg.norm(SB.group_forces(F, lab), axis=1)
+    assert np.allclose(g, [0, 0, 0, 300, 0])

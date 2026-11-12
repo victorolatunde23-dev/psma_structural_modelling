@@ -424,6 +424,13 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Fix:** each box edge is now **max(packmol box, actual coordinate extent) + 2 Å**. No two atoms can then be closer than 2 Å through the boundary. MergeSummary reports which source set each axis, and the contact count for the plain packmol box.
 - **New tables:** `Minimisation` (stages reached) and **`MinimisationChunks`** (energy and max force after every chunk) are written as the run goes, so a failure shows where it happened.
 
+### Constraint-aware force check; Zn pair diagnostic (v0.7.21)
+
+- **Run of 2026-11-12 18:00 (T4), v0.7.20, empirical Zn force constants:** k now 17.6–253.5 kcal/mol/Å² (Glu425 OE1 17.6, previously 0). Minimisation and the 40 ps test completed again. The Zn change after minimisation fell from 0.47 to 0.40 Å; Zn2 still draws in Asp387 OD2 (2.02 → 1.64 Å) and the hydroxide O (2.05 → 1.67 Å). At 310 K the deviations are smaller (Asp387 OD2 1.63–1.75 Å, Zn2–O(H) 1.77–1.81 Å, Glu425 OE1 back at 2.45 Å).
+- **The force check was a false alarm.** All 15 largest forces (2,267–2,793 kJ/mol/nm) were bulk-water oxygens. With rigid water and constrained X–H bonds, an atom's raw force includes the part along its constraints, which the constraint cancels. Max force is now the net force on each rigid group (water molecule, X–H group), for the stop criterion, the check, RunawayForces and FinalForces.
+- **New table ZnPairs:** for every Zn–ligand bond, it shows what the OpenMM system actually holds: bond r0 and k, whether the pair is excluded from the nonbonded terms, the two charges, and the nonbonded pull on the ligand atom towards the zinc. This tells us why Zn2 contracts before deciding how to treat it.
+- The next run resumes from the finished minimisation (same prmtop): no rebuild and no new minimisation, only the checks and the 40 ps test.
+
 ### Empirical zinc force constants; final-force table (v0.7.20)
 
 - **Run of 2026-11-12 14:20 (T4), v0.7.19:** for the first time the whole system minimised and ran the 40 ps test (heated to 300 K, NPT at 310 K, all finite). Two critical checks failed:
