@@ -424,6 +424,26 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Fix:** each box edge is now **max(packmol box, actual coordinate extent) + 2 Å**. No two atoms can then be closer than 2 Å through the boundary. MergeSummary reports which source set each axis, and the contact count for the plain packmol box.
 - **New tables:** `Minimisation` (stages reached) and **`MinimisationChunks`** (energy and max force after every chunk) are written as the run goes, so a failure shows where it happened.
 
+### Notebook 06: equilibration and production (v0.7.23)
+
+- New `md_run.py`, `scripts/run_md_setup.py equilibrate|produce` and **notebook 06**.
+- **Starts from `system.xml`, not the prmtop,** so the hydroxide-H LJ core and the Zn r0 correction are kept. Notebook 05's restraint force and barostat are stripped. Hydrogen mass repartitioning (3.024 amu; water stays rigid TIP3P) is applied.
+- **Equilibration:** CHARMM-GUI-style six steps (`md.equilibration.stages`), 1.875 ns in total.
+  - 2 × 125 ps NVT, then 125 ps NPT at 1 fs; 3 × 500 ps NPT at 2 fs.
+  - Positional restraints on the backbone (10 → 0.1 kcal/mol/Å²) and on side chains / Zn site / glycans (5 → 0).
+  - z restraint on the lipid heads (PC P31, CHL O1; 2.5 → 0).
+  - Membrane barostat: 1 bar, tensionless, XY isotropic, Z free.
+- **Production:** 100 ns NPT at 4 fs, in 1 ns segments.
+- **Resumable everywhere:** `state.xml` is saved after every segment (25 ps / 1 ns), with `progress.json` keyed to `system.xml` and the minimised coordinates. `--max-minutes` stops before a segment that would not finish.
+- **Per-segment log:** temperature, box, area per lipid (PC + CHL per leaflet), Zn–ligand distances and deviation from the crystal, Cα RMSD (Kabsch), ns/day. MDProgress gives the estimated GPU hours left.
+- **Trajectory:** solute-only DCD frames (protein, Zn site, glycans, crystal ions) with `solute.pdb`.
+- **EquilibrationChecks gate production:**
+  - temperature within 3 K;
+  - Zn deviation ≤ 0.3 Å;
+  - box-area drift over the last stage ≤ 1.5 % (warning);
+  - area per lipid 40–70 Å² (warning);
+  - Cα RMSD ≤ 3 Å (warning).
+
 ### Zinc bond-length correction (v0.7.22)
 
 - **Run of 2026-11-12 18:30 (L4), v0.7.21:**

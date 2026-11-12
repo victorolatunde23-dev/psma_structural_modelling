@@ -9,6 +9,8 @@ environment's Python; each stage saves its workbook as usual and writes ``<stage
     python scripts/run_md_setup.py selftest --outputs /content/drive/MyDrive/psma_structural_modelling/outputs
     python scripts/run_md_setup.py zinc     --outputs ... --cache ... [--no-gpu]
     python scripts/run_md_setup.py system   --outputs ... --cache ... [--no-md]
+    python scripts/run_md_setup.py equilibrate --outputs ... [--max-minutes 300]     (notebook 06)
+    python scripts/run_md_setup.py produce     --outputs ... [--max-minutes 300]     (notebook 06)
 
 Exit status 0 = finished with no critical failure; 2 = a critical check failed; 1 = error.
 """
@@ -36,13 +38,14 @@ def dump(path: Path, stage: str, tables: dict, issues, extra: dict) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("stage", choices=["selftest", "zinc", "system"])
+    ap.add_argument("stage", choices=["selftest", "zinc", "system", "equilibrate", "produce"])
     ap.add_argument("--outputs")
     ap.add_argument("--cache")
     ap.add_argument("--prepared", help="prepared model (default: notebook 04 default microstate)")
     ap.add_argument("--no-gpu", action="store_true", help="PySCF on CPU")
     ap.add_argument("--no-md", action="store_true", help="system: build only, skip OpenMM")
     ap.add_argument("--tag", default="")
+    ap.add_argument("--max-minutes", type=float, default=None, help="equilibrate/produce: stop cleanly before this")
     a = ap.parse_args()
     setup_logging()
     paths = {k: v for k, v in (("outputs", a.outputs), ("cache", a.cache)) if v}
@@ -56,6 +59,13 @@ def main() -> int:
             dump(res_file, a.stage, {"SelfTest": pd.DataFrame([{"Item": k, "Value": v} for k, v in st.items()])}, None,
                  {"passed": bool(st.get("passed")), "minutes": round((time.time() - t0) / 60, 1)})
             return 0 if st.get("passed") else 2
+        if a.stage in ("equilibrate", "produce"):
+            from psma_pipeline.md_run import run_md
+            r = run_md(cfg, "eq" if a.stage == "equilibrate" else "prod", a.max_minutes)
+            fails = [i for i in r["issues"].to_frame().to_dict("records") if str(i.get("Status")) == "FAIL"]
+            dump(res_file, a.stage, r["tables"], r["issues"].to_frame(),
+                 {"status": r["status"], "workdir": r["workdir"], "critical_ok": not fails, "minutes": r["minutes"]})
+            return 2 if fails else 0
         prep = Path(a.prepared) if a.prepared else (cfg.outputs_dir / "model_preparation" / cfg.get("preparation.name")
                                                     / "microstates" / "microstate_00_default.pdb")
         if not prep.exists():
