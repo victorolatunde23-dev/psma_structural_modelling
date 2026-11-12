@@ -389,3 +389,13 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
   - re-running continues from the last stage and chunk, and the CPU pre-relaxation is saved as well.
   - A stage stops when the largest force is below `min_target_fraction` × `max_force_ok` (500 kJ/mol/nm), when the energy stops falling (< 10 kJ/mol per chunk), or after `min_max_chunks_*`.
 - **Zn–ligand distance changes are now measured from the built coordinates** (before any relaxation).
+
+### CPU minimisation measured: too slow; default back to GPU (v0.7.15)
+
+- **Run of 2026-11-11 16:38 (CPU runtime):**
+  - **build:** passed; with the v0.7.13 policy most lipids are kept;
+  - **StartForces:** the most strained atoms are all lipid–lipid contacts, nearly coincident atom pairs (e.g. OL H15S on PA C114) with forces up to 9×10²⁵ kJ/mol/nm, left by the shortened packing;
+  - **CPU pre-relaxation:** 5 × 100 steps took 5 h 50 min (**~40 s per step** for ~535k atoms with PME on a Colab CPU);
+  - **restrained minimisation:** one 200-step chunk had finished (checkpoint saved 01:06) when the session ended.
+- The checkpoint is kept: the next GPU run **resumes** from these pre-relaxed coordinates instead of starting again.
+- `MINIMISE_ON_CPU` now defaults to **False** (build only without a GPU): at the measured speed a full CPU minimisation would take days.
