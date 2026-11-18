@@ -424,6 +424,10 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Fix:** each box edge is now **max(packmol box, actual coordinate extent) + 2 Å**. No two atoms can then be closer than 2 Å through the boundary. MergeSummary reports which source set each axis, and the contact count for the plain packmol box.
 - **New tables:** `Minimisation` (stages reached) and **`MinimisationChunks`** (energy and max force after every chunk) are written as the run goes, so a failure shows where it happened.
 
+### Production length 200 ns (v0.7.31)
+
+- **Decision (user, 2026-11-18):** production is 200 ns (`md.production.ns`), run as 200 × 1 ns segments, each saved to Drive. A run can stop at any segment; finished nanoseconds are kept, and later sessions continue.
+
 ### Equilibration complete (v0.7.30)
 
 - **Equilibration finished on 2026-11-18** (L4; 1.875 ns; CHARMM-GUI protocol from job 9494567473; started 17:44 and completed 20:52 over two sessions). **EquilibrationChecks all PASS:**

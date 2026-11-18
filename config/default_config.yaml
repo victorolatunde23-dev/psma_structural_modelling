@@ -536,7 +536,7 @@ md:                             # Milestone 6: system setup (notebook 05)
     max_area_drift: 0.015       # readiness: relative change of the box xy area over the last stage
     max_zn_dev: 0.3             # Å; readiness: every Zn–ligand distance within this of the crystal, end of each stage
   production:
-    ns: 100                     # total production length (resumable over as many Colab sessions as needed)
+    ns: 200                     # USER DECISION (2026-11-18): 200 ns total production (resumable over as many Colab sessions as needed)
     dt_fs: 4                    # with HMR (hmr_mass above)
     segment_ps: 1000            # state saved and a trajectory file closed every segment
     frame_ps: 10                # solute frame every 10 ps (10,000 frames per 100 ns)
