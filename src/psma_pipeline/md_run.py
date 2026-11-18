@@ -33,7 +33,7 @@ import numpy as np
 import pandas as pd
 
 from .status import IssueLog, Status
-from .system_build import IONS, LIPID_HEADS, LIPID_TAILS, STEROLS, distances, make_simulation
+from .system_build import force_report, IONS, LIPID_HEADS, LIPID_TAILS, STEROLS, distances, make_simulation
 
 log = logging.getLogger(__name__)
 
@@ -423,8 +423,15 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
     base = mm.XmlSerializer.deserialize((sysdir / "system.xml").read_text())
     removed = strip_forces(base)
     n_hmr = apply_hmr(base, top, float(eqc.get("hmr_mass", 3.024)))
-    pdb = app.PDBFile(str(sysdir / "system_minimised.pdb"))
-    x0 = np.array(pdb.getPositions(asNumpy=True).value_in_unit(u.nanometer))
+    x0, x0_src = None, "system_minimised.pdb"
+    ck = sysdir / "minimise_checkpoint.npz"
+    if ck.exists():                          # notebook 05's exact (float64) minimised coordinates; the PDB is rounded
+        c = np.load(ck, allow_pickle=False)
+        if str(c["stage"]) == "done" and c["positions"].shape == (top.getNumAtoms(), 3) and np.isfinite(c["positions"]).all():
+            x0, x0_src = np.array(c["positions"], dtype=float), "minimise_checkpoint.npz (stage done)"
+    if x0 is None:
+        pdb = app.PDBFile(str(sysdir / "system_minimised.pdb"))
+        x0 = np.array(pdb.getPositions(asNumpy=True).value_in_unit(u.nanometer))
     groups = groups_from_topology(top)
     if not groups["heads"]:
         issues.add("md", Status.WARNING, "no lipid head atoms (PC P31 / CHL O1) found: no lipid restraint, no area per lipid")
@@ -446,7 +453,7 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
         with open(out / "solute.pdb", "w") as fh:
             app.PDBFile.writeFile(_subset_topology(top, solute), x0[solute] * u.nanometer, fh, keepIds=True)
     sub_top = _subset_topology(top, solute)
-    info = {"atoms": base.getNumParticles(), "forces removed from system.xml": ", ".join(removed) or "none",
+    info = {"atoms": base.getNumParticles(), "start coordinates": x0_src, "forces removed from system.xml": ", ".join(removed) or "none",
             "H with repartitioned mass": n_hmr, "backbone restrained": len(groups["bb"]),
             "other solute heavy restrained": len(groups["sc"]), "lipid heads (z restraint)": len(groups["heads"]),
             "lipid dihedrals restrained (chirality + cis)": len(torsions), "bulk ions restrained": len(groups["ions"]),
@@ -478,6 +485,9 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
                 x0 * u.nanometer, box0)
             if fails:
                 info["platforms that failed"] = "; ".join(fails)
+            for key in RESTRAINT_KEYS:
+                f = 4.184 if key == "tor" else KCAL_A2_TO_KJ_NM2
+                sim.context.setParameter(GLOBALS[key], seg[key] * f)
             if state_file.exists():
                 st = mm.XmlSerializer.deserialize(state_file.read_text())
                 sim.context.setPeriodicBoxVectors(*st.getPeriodicBoxVectors())
@@ -485,29 +495,53 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
                 sim.context.setVelocities(st.getVelocities())
                 sim.context.setTime(st.getTime())
             else:
+                # CHARMM-GUI step6.1 starts with a restrained minimisation (mini_nstep 5000, mini_Tol 100); it also
+                # settles the constraints and the HMR system before the first dynamics step
+                def fcheck(tag):
+                    s0 = sim.context.getState(getEnergy=True, getForces=True)
+                    F = s0.getForces(asNumpy=True).value_in_unit(u.kilojoule_per_mole / u.nanometer)
+                    e0 = s0.getPotentialEnergy().value_in_unit(u.kilojoule_per_mole)
+                    fm = float(np.nanmax(np.linalg.norm(F, axis=1)))
+                    info[f"{tag}: energy (kJ/mol)"], info[f"{tag}: max force (kJ/mol/nm)"] = round(e0, 1), round(fm, 1)
+                    log.info("%s: E = %.1f kJ/mol, max force %.1f kJ/mol/nm", tag, e0, fm)
+                    return F, e0
+                F, e0 = fcheck("before restrained minimisation")
+                force_report(top, F).to_csv(out / "start_forces.csv", index=False)
+                mm.LocalEnergyMinimizer.minimize(sim.context, float(eqc.get("mini_tol", 100.0)) * u.kilojoule_per_mole / u.nanometer,
+                                                 int(eqc.get("mini_nstep", 5000)))
+                F, e0 = fcheck("after restrained minimisation")
+                if not np.isfinite(e0):
+                    issues.add("md", Status.FAIL, "energy is not finite after the restrained minimisation: see StartForces")
+                    status = "failed"
+                    break
                 sim.context.setVelocitiesToTemperature(T * u.kelvin)
-            for key in RESTRAINT_KEYS:
-                f = 4.184 if key == "tor" else KCAL_A2_TO_KJ_NM2
-                sim.context.setParameter(GLOBALS[key], seg[key] * f)
             cur_stage = seg["stage"]
             log.info("%s: %s on %s (dt %.0f fs, restraints %s)", phase, cur_stage, platform_name, seg["dt_fs"],
                      ", ".join(f"{k} {seg[k]:g}" for k in RESTRAINT_KEYS))
         # ---- the segment, with solute frames -----------------------------------------------------------
         fsteps = max(1, int(round(frame_ps / (seg["dt_fs"] / 1000.0))))
         dcd_path = out / "traj" / f"{seg['id'].replace(':', '_').replace(' ', '')}.dcd"
-        temps = []
+        temps, raise_nan = [], False
         with open(dcd_path, "wb") as fh:
             dcd = app.DCDFile(fh, sub_top, seg["dt_fs"] / 1000.0 * fsteps * u.picoseconds)
             done = 0
             while done < seg["steps"]:
                 n = min(fsteps, seg["steps"] - done)
-                sim.step(n)
+                try:
+                    sim.step(n)
+                except Exception as ex:  # noqa: BLE001  (OpenMM: "Particle coordinate is NaN")
+                    issues.add("md", Status.FAIL, f"{seg['id']}: {ex} after {done} steps; the last saved state is kept")
+                    raise_nan = True
+                    break
                 done += n
                 st = sim.context.getState(getPositions=True, getEnergy=True)
                 x = st.getPositions(asNumpy=True).value_in_unit(u.nanometer)
                 dcd.writeModel(x[solute] * u.nanometer, periodicBoxVectors=st.getPeriodicBoxVectors())
                 dof = 3 * system.getNumParticles() - system.getNumConstraints() - 3
                 temps.append(2 * st.getKineticEnergy().value_in_unit(u.kilojoule_per_mole) / (dof * 0.0083144626))
+        if raise_nan:
+            status = "failed"
+            break
         st = sim.context.getState(getPositions=True, getVelocities=True, getEnergy=True)
         e = st.getPotentialEnergy().value_in_unit(u.kilojoule_per_mole)
         x = st.getPositions(asNumpy=True).value_in_unit(u.nanometer)
@@ -540,6 +574,8 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
         status = "paused"
     df = pd.DataFrame(rows)
     tables = {"MDLog": df, "MDInfo": pd.DataFrame([{"Item": k, "Value": v} for k, v in info.items()])}
+    if (out / "start_forces.csv").exists():
+        tables["StartForces"] = pd.read_csv(out / "start_forces.csv")
     rate = df["ns/day"].iloc[-3:].mean() if len(df) else float("nan")
     left_ns = sum(s["ps"] for s in remaining) / 1000.0
     tables["MDProgress"] = pd.DataFrame([{"Item": k, "Value": v} for k, v in {

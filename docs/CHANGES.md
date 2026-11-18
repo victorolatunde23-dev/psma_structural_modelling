@@ -424,6 +424,13 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Fix:** each box edge is now **max(packmol box, actual coordinate extent) + 2 Å**. No two atoms can then be closer than 2 Å through the boundary. MergeSummary reports which source set each axis, and the contact count for the plain packmol box.
 - **New tables:** `Minimisation` (stages reached) and **`MinimisationChunks`** (energy and max force after every chunk) are written as the run goes, so a failure shows where it happened.
 
+### Equilibration start: exact coordinates and a restrained minimisation (v0.7.28)
+
+- **Run of 2026-11-18 10:42:** "Particle coordinate is NaN" in the first segment of step 6.1, the first dynamics with HMR and the CHARMM-GUI restraints. Notebook 05's 40 ps test on the same system was stable.
+- **Start coordinates:** notebook 05's exact float64 minimised coordinates (`minimise_checkpoint.npz`, stage done) are used instead of `system_minimised.pdb`. The PDB is rounded to 0.001 Å, and with 534,300 atoms and >9,999 residues it relies on wrapped serial and residue numbers. The source is listed in MDInfo.
+- **Restrained minimisation before the first dynamics,** as CHARMM-GUI's step6.1 does (`mini_nstep` 5000, `mini_Tol` 100 kJ/mol/nm; `md.equilibration.mini_nstep` / `mini_tol`), with the 6.1 restraints switched on. It also settles the constraints of the HMR system. Energy and max force before and after go to MDInfo, and the largest forces at the start to `start_forces.csv` (table StartForces).
+- **A NaN during a segment** is now reported as a FAIL issue with the segment and step. The last saved state is kept, and there is no traceback.
+
 ### CHARMM-GUI inputs checked; barostat frequency (v0.7.27)
 
 - **Checked against the real CHARMM-GUI OpenMM inputs** (job 9494567473, unpacked on Drive). The restraints, read in kJ/mol/nm² and kJ/mol/rad²:
