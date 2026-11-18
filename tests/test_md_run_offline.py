@@ -98,3 +98,22 @@ def test_charmm_gui_stage_parser(tmp_path):
     assert abs(st[0]["tor"] - 1000 / 4.184) < 1e-9 and st[0]["wat"] == 0.0 and st[0]["ion"] == 0.0
     assert st[1]["sc"] == 0.0
     assert M.charmm_gui_stages(tmp_path / "missing") is None
+
+
+def test_find_charmm_gui_unpacks_openmm_inputs(tmp_path):
+    import io
+    import tarfile
+    d = tmp_path / "CHARMM-GUI"
+    d.mkdir()
+    with tarfile.open(d / "charmm-gui.tgz", "w:gz") as tf:
+        for name, text in (("charmm-gui-123/openmm/step6.1_equilibration.inp", "nstep = 10\ndt = 0.001\nfc_bb = 4184\n"),
+                           ("charmm-gui-123/openmm/step5_input.psf", "big"), ("charmm-gui-123/step6.1_equilibration.inp", "x")):
+            b = text.encode()
+            ti = tarfile.TarInfo(name)
+            ti.size = len(b)
+            tf.addfile(ti, io.BytesIO(b))
+    found = M.find_charmm_gui(tmp_path)
+    assert found == d and [p.name for p in (d / "openmm_inputs").iterdir()] == ["step6.1_equilibration.inp"]
+    assert M.charmm_gui_stages(found)[0]["bb"] == 10.0
+    (d / "openmm_inputs" / "step6.1_equilibration.inp").write_text("nstep = 10\ndt = 0.001\n")
+    assert M.charmm_gui_stages(found) is None                       # unrecognised format: fall back to the config

@@ -424,6 +424,12 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Fix:** each box edge is now **max(packmol box, actual coordinate extent) + 2 Å**. No two atoms can then be closer than 2 Å through the boundary. MergeSummary reports which source set each axis, and the contact count for the plain packmol box.
 - **New tables:** `Minimisation` (stages reached) and **`MinimisationChunks`** (energy and max force after every chunk) are written as the run goes, so a failure shows where it happened.
 
+### CHARMM-GUI archive read straight from Drive (v0.7.25)
+
+- `find_charmm_gui()` finds the folder under `outputs/` whatever its spelling (`CHARMM-GUI`, `charmm_gui`, `charmm-gui`). If it holds only the downloaded `charmm-gui.tgz` (as on Drive, 269 MB), the OpenMM input files (`openmm/*.inp`) are unpacked once into `outputs/CHARMM-GUI/openmm_inputs/`. There is no need to unpack the archive by hand.
+- **Guard:** if CHARMM-GUI's `step6.1_equilibration.inp` has no `fc_bb`, the format is not recognised and the config protocol is used (with a warning), instead of silently running without restraints.
+- Notebook 06, cell 1, prints `step6.1_equilibration.inp` as read, so the values can be checked before any GPU time is spent.
+
 ### Equilibration matches CHARMM-GUI's restraint protocol (v0.7.24)
 
 - **Decision (user, 2026-11-18):** equilibrate the Amber system exactly like the CHARMM-GUI comparison build (job 9494567473), so the two systems differ only in force field and build, not in protocol.

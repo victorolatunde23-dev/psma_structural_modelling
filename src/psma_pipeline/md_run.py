@@ -220,6 +220,35 @@ def lipid_torsions(atoms: list[tuple[int, str, str, int]], bonds: list[tuple[int
     return out
 
 
+def find_charmm_gui(outputs: str | Path, name: str = "charmm_gui") -> Path | None:
+    """The folder with CHARMM-GUI's OpenMM inputs under ``outputs``: ``charmm_gui``, ``CHARMM-GUI``, ``charmm-gui``…
+    (any case). If it holds only the downloaded ``charmm-gui*.tgz``, the small OpenMM input files
+    (``openmm/*.inp``) are unpacked from it into ``<folder>/openmm_inputs/`` (once)."""
+    import tarfile
+    outputs = Path(outputs)
+    want = name.lower().replace("-", "_")
+    cands = [d for d in outputs.iterdir() if d.is_dir() and d.name.lower().replace("-", "_") == want] \
+        if outputs.exists() else []
+    for d in cands:
+        if any(d.rglob("step6.*_equilibration.inp")):
+            return d
+        for tgz in sorted(d.glob("*.tgz")) + sorted(d.glob("*.tar.gz")):
+            dest = d / "openmm_inputs"
+            with tarfile.open(tgz) as tf:
+                members = [m for m in tf.getmembers() if m.isfile() and "/openmm/" in "/" + m.name
+                           and m.name.endswith(".inp")]
+                for m in members:
+                    f = tf.extractfile(m)
+                    if f is not None:
+                        out = dest / Path(m.name).name
+                        out.parent.mkdir(parents=True, exist_ok=True)
+                        out.write_bytes(f.read())
+            if any(dest.glob("step6.*_equilibration.inp")):
+                log.info("unpacked %s OpenMM input files from %s", len(list(dest.glob('*.inp'))), tgz.name)
+                return d
+    return None
+
+
 def charmm_gui_stages(folder: str | Path) -> list[dict] | None:
     """The six equilibration steps of a CHARMM-GUI OpenMM input set (``openmm/step6.N_equilibration.inp``), in this
     module's stage format, so the Amber system is equilibrated exactly like the CHARMM-GUI one.
@@ -239,6 +268,9 @@ def charmm_gui_stages(folder: str | Path) -> list[dict] | None:
         num = lambda k, d=0.0: float(kv[k]) if k in kv else d  # noqa: E731
         dt_ps = num("dt", 0.001)
         npt = kv.get("pcouple", "no").lower() in ("yes", "true", "1")
+        if not stages and "fc_bb" not in kv:
+            log.warning("%s has no fc_bb: CHARMM-GUI input format not recognised, using the config protocol", f.name)
+            return None
         stages.append({"name": f.name.split("_")[0].replace("step", ""), "ensemble": "NPT" if npt else "NVT",
                        "ps": num("nstep") * dt_ps, "dt_fs": round(dt_ps * 1000, 3),
                        "bb": num("fc_bb") / KCAL_A2_TO_KJ_NM2, "sc": num("fc_sc") / KCAL_A2_TO_KJ_NM2,
@@ -346,8 +378,8 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
     pc = cfg.get("md.production", {}) or {}
     T = float(cfg.get("md.openmm.temperature_k", 310))
     stages, protocol_src = list(eqc.get("stages") or []), "config md.equilibration.stages (CHARMM-GUI defaults)"
-    cg_dir = cfg.outputs_dir / str(eqc.get("charmm_gui_dir", "charmm_gui"))
-    if eqc.get("protocol", "charmm_gui_if_present") == "charmm_gui_if_present" and cg_dir.exists():
+    cg_dir = find_charmm_gui(cfg.outputs_dir, str(eqc.get("charmm_gui_dir", "charmm_gui")))
+    if eqc.get("protocol", "charmm_gui_if_present") == "charmm_gui_if_present" and cg_dir is not None:
         cg = charmm_gui_stages(cg_dir)
         if cg:
             stages, protocol_src = cg, f"CHARMM-GUI OpenMM inputs in {cg_dir} ({len(cg)} steps)"
