@@ -249,6 +249,12 @@ def find_charmm_gui(outputs: str | Path, name: str = "charmm_gui") -> Path | Non
     return None
 
 
+# restraint keys in CHARMM-GUI's OpenMM inputs: fc_bb / fc_sc protein backbone / side chains (kJ/mol/nm²),
+# fc_lpos lipid head z (kJ/mol/nm²; older inputs fc_mpos), fc_ldih lipid dihedrals (kJ/mol/rad²; older fc_mdih),
+# fc_cdih carbohydrate dihedrals (CHARMM-GUI glycans; this build has none, so not used here)
+FC_KNOWN = {"fc_bb", "fc_sc", "fc_lpos", "fc_mpos", "fc_ldih", "fc_mdih", "fc_cdih", "fc_wat", "fc_ion"}
+
+
 def charmm_gui_stages(folder: str | Path) -> list[dict] | None:
     """The six equilibration steps of a CHARMM-GUI OpenMM input set (``openmm/step6.N_equilibration.inp``), in this
     module's stage format, so the Amber system is equilibrated exactly like the CHARMM-GUI one.
@@ -271,11 +277,19 @@ def charmm_gui_stages(folder: str | Path) -> list[dict] | None:
         if not stages and "fc_bb" not in kv:
             log.warning("%s has no fc_bb: CHARMM-GUI input format not recognised, using the config protocol", f.name)
             return None
+        first = lambda *ks: next((num(k) for k in ks if k in kv), 0.0)  # noqa: E731
+        unknown = sorted(k for k in kv if k.startswith("fc_") and k not in FC_KNOWN)
+        if unknown:
+            log.warning("%s: restraint settings not understood: %s - using the config protocol instead",
+                        f.name, ", ".join(unknown))
+            return None
         stages.append({"name": f.name.split("_")[0].replace("step", ""), "ensemble": "NPT" if npt else "NVT",
                        "ps": num("nstep") * dt_ps, "dt_fs": round(dt_ps * 1000, 3),
                        "bb": num("fc_bb") / KCAL_A2_TO_KJ_NM2, "sc": num("fc_sc") / KCAL_A2_TO_KJ_NM2,
-                       "lip": num("fc_mpos") / KCAL_A2_TO_KJ_NM2, "tor": num("fc_mdih") / 4.184,
-                       "wat": num("fc_wat") / KCAL_A2_TO_KJ_NM2, "ion": num("fc_ion") / KCAL_A2_TO_KJ_NM2,
+                       "lip": first("fc_lpos", "fc_mpos") / KCAL_A2_TO_KJ_NM2,
+                       "tor": first("fc_ldih", "fc_mdih") / 4.184,
+                       "wat": first("fc_wat") / KCAL_A2_TO_KJ_NM2, "ion": first("fc_ion") / KCAL_A2_TO_KJ_NM2,
+                       "fc settings read": ", ".join(f"{k}={kv[k]}" for k in sorted(kv) if k.startswith("fc_")),
                        "source": str(f.name)})
     return stages
 

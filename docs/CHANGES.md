@@ -424,6 +424,12 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Fix:** each box edge is now **max(packmol box, actual coordinate extent) + 2 Å**. No two atoms can then be closer than 2 Å through the boundary. MergeSummary reports which source set each axis, and the contact count for the plain packmol box.
 - **New tables:** `Minimisation` (stages reached) and **`MinimisationChunks`** (energy and max force after every chunk) are written as the run goes, so a failure shows where it happened.
 
+### CHARMM-GUI lipid restraint keys (v0.7.26)
+
+- **Found in the first read of the real archive (2026-11-18):** the protein restraints, step lengths and time steps were read correctly (fc_bb 4000 → 9.56 kcal/mol/Å²; 125/125/125 ps at 1 fs, then 500/500/500 ps at 2 fs). But the lipid restraints came out as 0, because CHARMM-GUI's OpenMM inputs call them `fc_lpos` (lipid head z) and `fc_ldih` (lipid dihedrals), not `fc_mpos` / `fc_mdih`. Both spellings are now accepted. The equilibration had not been started.
+- **Guard:** any `fc_*` key that is not understood makes the reader fall back to the config protocol, with a warning naming the key, instead of silently using 0. `fc_cdih` (CHARMM-GUI glycan dihedrals) is recognised and not used, because the CHARMM-GUI build has no glycans.
+- The stage table shows every `fc_*` value as read ("fc settings read"). Notebook 06, cell 1, prints all restraint and run settings of `step6.1_equilibration.inp`.
+
 ### CHARMM-GUI archive read straight from Drive (v0.7.25)
 
 - `find_charmm_gui()` finds the folder under `outputs/` whatever its spelling (`CHARMM-GUI`, `charmm_gui`, `charmm-gui`). If it holds only the downloaded `charmm-gui.tgz` (as on Drive, 269 MB), the OpenMM input files (`openmm/*.inp`) are unpacked once into `outputs/CHARMM-GUI/openmm_inputs/`. There is no need to unpack the archive by hand.

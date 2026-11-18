@@ -117,3 +117,16 @@ def test_find_charmm_gui_unpacks_openmm_inputs(tmp_path):
     assert M.charmm_gui_stages(found)[0]["bb"] == 10.0
     (d / "openmm_inputs" / "step6.1_equilibration.inp").write_text("nstep = 10\ndt = 0.001\n")
     assert M.charmm_gui_stages(found) is None                       # unrecognised format: fall back to the config
+
+
+def test_charmm_gui_lipid_keys_and_unknown_guard(tmp_path):
+    """CHARMM-GUI's OpenMM inputs name the lipid restraints fc_lpos / fc_ldih (missed by v0.7.25: 0 was used)."""
+    d = tmp_path / "cg" / "openmm"
+    d.mkdir(parents=True)
+    (d / "step6.1_equilibration.inp").write_text("nstep = 125000\ndt = 0.001\nrest = yes\nfc_bb = 4000.0\n"
+                                                 "fc_sc = 2000.0\nfc_lpos = 1000.0\nfc_ldih = 1000.0\nfc_cdih = 1000.0\n")
+    st = M.charmm_gui_stages(tmp_path / "cg")[0]
+    assert abs(st["lip"] - 1000 / 418.4) < 1e-9 and abs(st["tor"] - 1000 / 4.184) < 1e-9
+    assert "fc_lpos=1000.0" in st["fc settings read"]
+    (d / "step6.1_equilibration.inp").write_text("nstep = 1\ndt = 0.001\nfc_bb = 4000\nfc_newthing = 5\n")
+    assert M.charmm_gui_stages(tmp_path / "cg") is None
