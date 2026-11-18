@@ -38,6 +38,9 @@ from .system_build import force_report, IONS, LIPID_HEADS, LIPID_TAILS, STEROLS,
 log = logging.getLogger(__name__)
 
 WATER = {"HOH", "WAT"}
+# bump when the MD protocol changes in a way that invalidates a run in progress (it then restarts from the
+# minimised system). v2 (2026-11-18): glycerol chirality restraint had the mirror-image target in v0.7.24-28.
+PROTOCOL_VERSION = "md-v2"
 KCAL_A2_TO_KJ_NM2 = 418.4
 # restraint strengths per stage (CHARMM-GUI Membrane Builder equilibration, CHARMM convention E = k·d²):
 #   bb / sc: protein backbone / other solute heavy atoms (kcal/mol/Å²); lip: z of lipid heads (kcal/mol/Å², CHARMM-GUI
@@ -179,6 +182,14 @@ def strip_forces(system) -> list[str]:
     return removed
 
 
+def dihedrals(x_nm: np.ndarray, quads: np.ndarray) -> np.ndarray:
+    """IUPAC dihedral angles (rad, same sign as OpenMM's CustomTorsionForce theta) for rows (i, j, k, l)."""
+    p0, p1, p2, p3 = (x_nm[quads[:, c]] for c in range(4))
+    b1, b2, b3 = p1 - p0, p2 - p1, p3 - p2
+    n1, n2 = np.cross(b1, b2), np.cross(b2, b3)
+    return np.arctan2(np.linalg.norm(b2, axis=1) * np.sum(b1 * n2, axis=1), np.sum(n1 * n2, axis=1))
+
+
 def lipid_torsions(atoms: list[tuple[int, str, str, int]], bonds: list[tuple[int, int]],
                    x0_nm: np.ndarray) -> list[tuple[int, int, int, int, float, float]]:
     """Dihedral restraints CHARMM-GUI puts on lipids, found from the bond graph (no atom-name tables needed):
@@ -202,8 +213,7 @@ def lipid_torsions(atoms: list[tuple[int, str, str, int]], bonds: list[tuple[int
     def dihedral(i, j, k, l):
         b1, b2, b3 = x0_nm[j] - x0_nm[i], x0_nm[k] - x0_nm[j], x0_nm[l] - x0_nm[k]
         n1, n2 = np.cross(b1, b2), np.cross(b2, b3)
-        m = np.cross(n1, b2 / np.linalg.norm(b2))
-        return float(np.arctan2(m @ n2, n1 @ n2))
+        return float(np.arctan2(np.linalg.norm(b2) * (b1 @ n2), n1 @ n2))     # IUPAC sign, as OpenMM's theta
     for i, (rn, el, ri) in info.items():
         if el != "C":
             continue
@@ -404,15 +414,16 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
     frame_ps = float((pc if phase == "prod" else eqc).get("frame_ps", 10 if phase == "prod" else 5))
 
     # ---- progress / resume ------------------------------------------------------------------------------
-    key = f"{_sha(sysdir / 'system.xml')}:{_sha(sysdir / 'system_minimised.pdb')}"
+    key = f"{PROTOCOL_VERSION}:{_sha(sysdir / 'system.xml')}:{_sha(sysdir / 'system_minimised.pdb')}"
     prog_file, state_file = out / "progress.json", out / "state.xml"
     prog = json.loads(prog_file.read_text()) if prog_file.exists() else {}
     if prog.get("key") != key:
         if prog:
             issues.add("md", Status.WARNING, "system changed since the last MD run: starting again from the minimised system")
         prog = {"key": key, "done": [], "eq_done": False}
-        for f in (state_file, out / "log.csv"):
-            f.unlink(missing_ok=True)
+        if (out / "log.csv").exists():                 # keep the superseded run's log for the record
+            (out / "log.csv").replace(out / f"log_superseded_{time.strftime('%Y%m%d_%H%M%S')}.csv")
+        state_file.unlink(missing_ok=True)
     if phase == "prod" and not prog.get("eq_done"):
         raise RuntimeError("equilibration has not finished (or did not pass): run section E first")
     todo = [s for s in plan if s["id"] not in set(prog["done"])]
@@ -443,6 +454,8 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
     head_dz = float(np.mean(np.abs(x0[groups["heads"], 2] - z_mid))) if groups["heads"] else 0.0
     water_core = max(0.0, head_dz - float(eqc.get("water_core_offset_A", 7.0)) / 10.0)
     add_restraints(base, x0, groups, torsions, z_mid, water_core)
+    chir_q = np.array([t[:4] for t in torsions if t[5] > 0], dtype=int).reshape(-1, 4)     # glycerol C2 impropers
+    chir_sign = np.sign(dihedrals(x0, chir_q)) if len(chir_q) else np.array([])
     box0 = prm.topology.getPeriodicBoxVectors() or app.AmberInpcrdFile(str(sysdir / "system.inpcrd")).boxVectors
     zinfo = json.loads((sysdir / "zn_r0_correction.json").read_text()) if (sysdir / "zn_r0_correction.json").exists() else {}
     zn_pairs = [tuple(p) for p in zinfo.get("pairs", [])]
@@ -563,6 +576,8 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
                      "Max Zn–ligand deviation (Å)": round(float(np.max(np.abs(d - zn_ref))), 3) if len(d) and len(d) == len(zn_ref) else None,
                      "Zn–ligand distances (Å)": ", ".join(f"{v:.2f}" for v in d),
                      "Cα RMSD from start (Å)": round(10 * kabsch_rmsd(x[ca], x0[ca]), 3) if ca else None,
+                     "Glycerol chirality kept (%)": round(100 * float(np.mean(np.sign(dihedrals(x, chir_q)) == chir_sign)), 2)
+                     if len(chir_q) else None,
                      "ns/day": round(seg["ps"] / 1000.0 / (secs / 86400.0), 2)})
         pd.DataFrame(rows).to_csv(out / "log.csv", index=False)
         prog["done"].append(seg["id"])
@@ -624,6 +639,11 @@ def equilibration_checks(df: pd.DataFrame, cfg: Any) -> pd.DataFrame:
     if len(zd):
         add("zn_site", float(zd.max()) <= float(eqc.get("max_zn_dev", 0.3)),
             f"largest Zn–ligand deviation from the crystal {float(zd.max()):.2f} Å (limit {eqc.get('max_zn_dev', 0.3)})")
+    if "Glycerol chirality kept (%)" in df:
+        ch = df["Glycerol chirality kept (%)"].dropna()
+        if len(ch):
+            add("lipid_chirality", float(ch.min()) >= 100.0, f"glycerol C2 configuration kept in {float(ch.min()):.2f}% of lipids "
+                "(lowest over all segments)")
     rm = df["Cα RMSD from start (Å)"].dropna()
     if len(rm):
         add("protein_rmsd", float(rm.iloc[-1]) <= 3.0, f"Cα RMSD at the end {float(rm.iloc[-1]):.2f} Å", warn=True)

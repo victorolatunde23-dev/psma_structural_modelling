@@ -130,3 +130,22 @@ def test_charmm_gui_lipid_keys_and_unknown_guard(tmp_path):
     assert "fc_lpos=1000.0" in st["fc settings read"]
     (d / "step6.1_equilibration.inp").write_text("nstep = 1\ndt = 0.001\nfc_bb = 4000\nfc_newthing = 5\n")
     assert M.charmm_gui_stages(tmp_path / "cg") is None
+
+
+def test_dihedral_sign_matches_iupac_openmm():
+    """v0.7.24-28 computed the mirror-image sign, so the glycerol chirality restraint pulled every POPC towards the
+    wrong enantiomer (70,000 kJ/mol/nm on PC C2 at the start of the 2026-11-18 run)."""
+    rng = np.random.default_rng(1)
+    P = rng.normal(size=(4, 3))
+    b1, b2, b3 = P[1] - P[0], P[2] - P[1], P[3] - P[2]
+    iupac = np.arctan2(np.linalg.norm(b2) * b1 @ np.cross(b2, b3), np.cross(b1, b2) @ np.cross(b2, b3))
+    assert abs(M.dihedrals(P, np.array([[0, 1, 2, 3]]))[0] - iupac) < 1e-12
+    # a right-handed reference: +90 degrees
+    Q = np.array([[1.0, 0, 0], [0, 0, 0], [0, 0, 1], [0, 1, 1]])
+    assert abs(np.degrees(M.dihedrals(Q, np.array([[0, 1, 2, 3]]))[0]) - 90.0) < 1e-9
+    atoms = [(0, "PC", "C", 0), (1, "PC", "C", 0), (2, "PC", "C", 0), (3, "PC", "O", 0), (4, "PC", "H", 0),
+             (5, "PC", "H", 0), (6, "PC", "H", 0), (7, "PC", "H", 0), (8, "PC", "H", 0)]
+    bonds = [(0, 1), (1, 2), (1, 3), (1, 4), (0, 5), (0, 6), (2, 7), (2, 8)]
+    x = rng.normal(size=(9, 3))
+    t0 = M.lipid_torsions(atoms, bonds, x)[0]
+    assert abs(t0[4] - M.dihedrals(x, np.array([t0[:4]]))[0]) < 1e-12      # restraint target = the built configuration

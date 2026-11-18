@@ -424,6 +424,20 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Fix:** each box edge is now **max(packmol box, actual coordinate extent) + 2 Å**. No two atoms can then be closer than 2 Å through the boundary. MergeSummary reports which source set each axis, and the contact count for the plain packmol box.
 - **New tables:** `Minimisation` (stages reached) and **`MinimisationChunks`** (energy and max force after every chunk) are written as the run goes, so a failure shows where it happened.
 
+### Glycerol chirality restraint fixed; equilibration restarts (v0.7.29)
+
+- **Run of 2026-11-18 10:45–13:45 (176 min, CUDA):**
+  - 19 of 75 segments ran (6.1–6.3 complete, 6.4 at 100 of 500 ps), stable throughout: T 309.6–310.7 K; Zn–ligand deviation ≤ 0.20 Å; Cα RMSD 0.11–0.22 Å.
+  - The box xy shrank from 171.8 to 167.6 Å in NPT (area per lipid 60.4 → 57.5 Å², still falling).
+  - Speed 3.6 ns/day at 1 fs and 6.4 ns/day at 2 fs.
+  - The restrained minimisation took the max force from 70,283 to 7,553 kJ/mol/nm.
+- **Bug, in my code (v0.7.24–0.7.28):** `lipid_torsions` measured the glycerol improper with the opposite sign to OpenMM's `theta`. The chirality restraint therefore targeted the **mirror image** of every POPC glycerol C2. StartForces showed it: all 15 largest start forces (~70,000 kJ/mol/nm) were on PC C2. With 1000 → 200 kJ/mol/rad² over 6.1–6.4, part or all of the POPC may have been inverted to the wrong (sn-1/sn-3) enantiomer. **That run is discarded.** The *cis* C=C restraint (target 0°) was not affected.
+- **Fix:**
+  - IUPAC dihedral sign, the same as OpenMM (`dihedrals()`), checked against the reference formula in a test;
+  - each segment logs **"Glycerol chirality kept (%)"** against the built structure;
+  - EquilibrationChecks has a new `lipid_chirality` check that requires 100 %.
+- **Restart:** the resume key now includes `PROTOCOL_VERSION` (`md-v2`), so the next run starts again from notebook 05's minimised system. The old log is kept as `outputs/md_run/log_superseded_<time>.csv`.
+
 ### Equilibration start: exact coordinates and a restrained minimisation (v0.7.28)
 
 - **Run of 2026-11-18 10:42:** "Particle coordinate is NaN" in the first segment of step 6.1, the first dynamics with HMR and the CHARMM-GUI restraints. Notebook 05's 40 ps test on the same system was stable.
