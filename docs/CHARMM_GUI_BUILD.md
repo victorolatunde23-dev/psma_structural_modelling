@@ -38,3 +38,6 @@
 - Force field CHARMM36m; TIP3P; hydrogen mass repartitioning on.
 - Outputs: OpenMM (+ AMBER).
 - NPT; 310 K; PME grid automatic.
+
+## Equilibration protocol (shared)
+Notebook 06 (v0.7.24) equilibrates the Amber system with CHARMM-GUI's restraint protocol: backbone, side chains, lipid-head z, lipid dihedrals, water out of the bilayer core, and ions in step 1, with E = k·d². When this job's archive is unpacked in `outputs/charmm_gui/` on Drive, the exact values are read from its `openmm/step6.N_equilibration.inp` files.

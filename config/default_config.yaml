@@ -507,17 +507,24 @@ md:                             # Milestone 6: system setup (notebook 05)
     zn_bond_max_change: 0.3     # Å; Zn–ligand distance change allowed through minimisation / smoke run
     smoke_ps: [20, 20]          # restrained NVT heating to 310 K, then restrained NPT (membrane barostat); [] = skip
     temperature_k: 310
-  equilibration:                # notebook 06 (md_run.py): CHARMM-GUI-style six-step release of restraints
-    # k in kcal/mol/Å² (E = ½ k d²): bb = protein backbone N/CA/C/O; sc = other protein heavy atoms, Zn, hydroxide O,
-    # glycans, crystal ions; lip = z of the lipid head atoms (PC P31, CHL O1). Steps follow CHARMM-GUI's membrane
-    # protocol (Jo et al. 2008; Lee et al. 2016): 1 fs for steps 1–3, 2 fs for 4–6. HMR (below) is applied throughout.
+  equilibration:                # notebook 06 (md_run.py): the CHARMM-GUI Membrane Builder six-step protocol
+    # USER DECISION (2026-11-18): equilibrate exactly like CHARMM-GUI, so the Amber and CHARMM-GUI systems can be compared.
+    # protocol: charmm_gui_if_present -> if outputs/<charmm_gui_dir> holds a CHARMM-GUI archive, its OpenMM inputs
+    # (openmm/step6.N_equilibration.inp: dt, nstep, fc_bb, fc_sc, fc_mpos, fc_mdih, ...) replace the table below.
+    protocol: charmm_gui_if_present
+    charmm_gui_dir: charmm_gui
+    # Defaults = CHARMM-GUI's suggested scheme (Jo et al. 2008; Lee et al. 2016), CHARMM convention E = k·d²:
+    #   bb backbone, sc other solute heavy atoms, lip lipid-head z ("mforce"), wat water kept out of the bilayer core
+    #   ("wforce"), ion bulk Na+/Cl- (kcal/mol/Å²); tor lipid dihedrals, glycerol chirality + cis C=C ("tforce",
+    #   kcal/mol/rad²; CHARMM-GUI OpenMM fc_mdih 1000/400/200/200/100/0 kJ/mol/rad²).
     stages:
-      - {name: "1 NVT", ensemble: NVT, ps: 125, dt_fs: 1, bb: 10.0, sc: 5.0, lip: 2.5}
-      - {name: "2 NVT", ensemble: NVT, ps: 125, dt_fs: 1, bb: 5.0, sc: 2.5, lip: 2.5}
-      - {name: "3 NPT", ensemble: NPT, ps: 125, dt_fs: 1, bb: 2.5, sc: 1.0, lip: 1.0}
-      - {name: "4 NPT", ensemble: NPT, ps: 500, dt_fs: 2, bb: 1.0, sc: 0.5, lip: 0.5}
-      - {name: "5 NPT", ensemble: NPT, ps: 500, dt_fs: 2, bb: 0.5, sc: 0.1, lip: 0.1}
-      - {name: "6 NPT", ensemble: NPT, ps: 500, dt_fs: 2, bb: 0.1, sc: 0.0, lip: 0.0}
+      - {name: "6.1 NVT", ensemble: NVT, ps: 125, dt_fs: 1, bb: 10.0, sc: 5.0, lip: 2.5, tor: 239.0, wat: 2.5, ion: 10.0}
+      - {name: "6.2 NVT", ensemble: NVT, ps: 125, dt_fs: 1, bb: 5.0, sc: 2.5, lip: 2.5, tor: 95.6, wat: 2.5, ion: 0.0}
+      - {name: "6.3 NPT", ensemble: NPT, ps: 125, dt_fs: 1, bb: 2.5, sc: 1.0, lip: 1.0, tor: 47.8, wat: 1.0, ion: 0.0}
+      - {name: "6.4 NPT", ensemble: NPT, ps: 500, dt_fs: 2, bb: 1.0, sc: 0.5, lip: 0.5, tor: 47.8, wat: 0.5, ion: 0.0}
+      - {name: "6.5 NPT", ensemble: NPT, ps: 500, dt_fs: 2, bb: 0.5, sc: 0.1, lip: 0.1, tor: 23.9, wat: 0.1, ion: 0.0}
+      - {name: "6.6 NPT", ensemble: NPT, ps: 500, dt_fs: 2, bb: 0.1, sc: 0.0, lip: 0.0, tor: 0.0, wat: 0.0, ion: 0.0}
+    water_core_offset_A: 7.0    # water-exclusion core = mean head-plane distance − this (≈ the hydrophobic core)
     segment_ps: 25              # state saved to Drive after every segment (resume point)
     frame_ps: 5                 # solute frame (protein + Zn site + glycans) written every this many ps
     hmr_mass: 3.024             # amu: hydrogen mass repartitioning (Hopkins et al. 2015), solute H only (water stays rigid TIP3P)

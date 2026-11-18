@@ -39,6 +39,12 @@ log = logging.getLogger(__name__)
 
 WATER = {"HOH", "WAT"}
 KCAL_A2_TO_KJ_NM2 = 418.4
+# restraint strengths per stage (CHARMM-GUI Membrane Builder equilibration, CHARMM convention E = k·d²):
+#   bb / sc: protein backbone / other solute heavy atoms (kcal/mol/Å²); lip: z of lipid heads (kcal/mol/Å², CHARMM-GUI
+#   "mforce"); tor: lipid dihedrals, glycerol chirality and cis double bond (kcal/mol/rad², "tforce"); wat: keeps water
+#   out of the bilayer core (kcal/mol/Å², "wforce"); ion: bulk Na+/Cl- positions (kcal/mol/Å²)
+RESTRAINT_KEYS = ("bb", "sc", "lip", "tor", "wat", "ion")
+GLOBALS = {"bb": "kbb", "sc": "ksc", "lip": "klip", "tor": "ktor", "wat": "kwat", "ion": "kion"}
 LIPID_HEAD_ATOMS = {("PC", "P31"), ("PE", "P31"), ("PS", "P31"), ("PGR", "P31"), ("CHL", "O1")}
 
 
@@ -58,8 +64,7 @@ def plan_segments(stages: list[dict], segment_ps: float, phase: str = "eq") -> l
             n += 1
             out.append({"id": f"{phase}:{s['name']}:{n}", "phase": phase, "stage": s["name"], "segment": n,
                         "steps": steps, "dt_fs": float(s["dt_fs"]), "ensemble": s.get("ensemble", "NPT"),
-                        "bb": float(s.get("bb", 0)), "sc": float(s.get("sc", 0)), "lip": float(s.get("lip", 0)),
-                        "ps": steps * dt})
+                        **{k: float(s.get(k, 0)) for k in RESTRAINT_KEYS}, "ps": steps * dt})
             done += steps
     return out
 
@@ -67,7 +72,7 @@ def plan_segments(stages: list[dict], segment_ps: float, phase: str = "eq") -> l
 def production_stages(cfg: Any) -> list[dict]:
     p = cfg.get("md.production", {}) or {}
     return [{"name": "production", "ensemble": "NPT", "ps": float(p.get("ns", 100)) * 1000.0,
-             "dt_fs": float(p.get("dt_fs", 4)), "bb": 0.0, "sc": 0.0, "lip": 0.0}]
+             "dt_fs": float(p.get("dt_fs", 4)), **{k: 0.0 for k in RESTRAINT_KEYS}}]
 
 
 # ---------------------------------------------------------------------------
@@ -91,15 +96,18 @@ def groups_from_topology(topology) -> dict[str, list[int]]:
 def classify_atoms(rows: list[tuple[int, str, str, str, bool]]) -> dict[str, list[int]]:
     """rows: (index, residue name, atom name, element, residue has backbone N+CA)."""
     lipid = LIPID_TAILS | LIPID_HEADS | STEROLS
-    g = {"bb": [], "sc": [], "heads": [], "ca": [], "solute": []}
+    g = {"bb": [], "sc": [], "heads": [], "ca": [], "solute": [], "ions": [], "water_o": []}
     for i, rn, an, el, has_ca in rows:
         if rn in WATER:
+            if el == "O":
+                g["water_o"].append(i)
             continue
         if rn in lipid:
             if (rn, an) in LIPID_HEAD_ATOMS:
                 g["heads"].append(i)
             continue
         if rn in IONS:                 # bulk Na+/Cl- (crystal Ca2+ and its Cl- have other names; kept as solute)
+            g["ions"].append(i)
             continue
         g["solute"].append(i)
         if el == "H":
@@ -170,11 +178,84 @@ def strip_forces(system) -> list[str]:
     return removed
 
 
-def add_restraints(system, x0_nm: np.ndarray, groups: dict[str, list[int]]) -> None:
-    """Positional restraints (backbone, side chains/metal site/glycans) and a z restraint on lipid heads, with
-    global strengths kbb, ksc, klip (kJ/mol/nm²) set per stage."""
+def lipid_torsions(atoms: list[tuple[int, str, str, int]], bonds: list[tuple[int, int]],
+                   x0_nm: np.ndarray) -> list[tuple[int, int, int, int, float, float]]:
+    """Dihedral restraints CHARMM-GUI puts on lipids, found from the bond graph (no atom-name tables needed):
+
+    - glycerol chirality: the sn-2 carbon of each phospholipid head (a carbon with one H, two C and one O
+      neighbours in a head residue); improper C(a)–C(b)–C2–O held at its built value ±2.5°;
+    - cis double bond: in each oleoyl tail, the two bonded CH carbons; C–C=C–C held at 0° (exactly cis).
+
+    atoms: (index, residue name, element, residue index); returns (i, j, k, l, theta0 rad, half-width rad)."""
+    nb: dict[int, list[int]] = {}
+    for i, j in bonds:
+        nb.setdefault(i, []).append(j)
+        nb.setdefault(j, []).append(i)
+    info = {i: (rn, el, ri) for i, rn, el, ri in atoms}
+    heads, tails_unsat = set(LIPID_HEADS), {"OL"}
+    out = []
+
+    def nbr(i, el):
+        return [j for j in nb.get(i, []) if info[j][1] == el]
+
+    def dihedral(i, j, k, l):
+        b1, b2, b3 = x0_nm[j] - x0_nm[i], x0_nm[k] - x0_nm[j], x0_nm[l] - x0_nm[k]
+        n1, n2 = np.cross(b1, b2), np.cross(b2, b3)
+        m = np.cross(n1, b2 / np.linalg.norm(b2))
+        return float(np.arctan2(m @ n2, n1 @ n2))
+    for i, (rn, el, ri) in info.items():
+        if el != "C":
+            continue
+        cs, hs, os_ = nbr(i, "C"), nbr(i, "H"), nbr(i, "O")
+        if rn in heads and len(hs) == 1 and len(cs) == 2 and len(os_) == 1:          # glycerol C2 (chiral)
+            ca, cb = sorted(cs)
+            out.append((ca, cb, i, os_[0], dihedral(ca, cb, i, os_[0]), np.deg2rad(2.5)))
+        elif rn in tails_unsat and len(hs) == 1:                                      # CH of the C=C
+            for j in cs:
+                if j > i and info[j][0] in tails_unsat and len(nbr(j, "H")) == 1:
+                    a = [c for c in cs if c != j]
+                    d = [c for c in nbr(j, "C") if c != i]
+                    if a and d:
+                        out.append((a[0], i, j, d[0], 0.0, 0.0))
+    return out
+
+
+def charmm_gui_stages(folder: str | Path) -> list[dict] | None:
+    """The six equilibration steps of a CHARMM-GUI OpenMM input set (``openmm/step6.N_equilibration.inp``), in this
+    module's stage format, so the Amber system is equilibrated exactly like the CHARMM-GUI one.
+    Restraints CHARMM-GUI's OpenMM inputs do not use are set to 0. Returns None if no inputs are found."""
+    files = sorted(Path(folder).rglob("step6.*_equilibration.inp"), key=lambda p: p.name)
+    files = [f for f in files if "openmm" in str(f.parent).lower()] or files
+    if not files:
+        return None
+    stages = []
+    for f in files:
+        kv = {}
+        for line in f.read_text().splitlines():
+            line = line.split("#")[0].strip()
+            if "=" in line:
+                k, v = (t.strip() for t in line.split("=", 1))
+                kv[k.lower()] = v
+        num = lambda k, d=0.0: float(kv[k]) if k in kv else d  # noqa: E731
+        dt_ps = num("dt", 0.001)
+        npt = kv.get("pcouple", "no").lower() in ("yes", "true", "1")
+        stages.append({"name": f.name.split("_")[0].replace("step", ""), "ensemble": "NPT" if npt else "NVT",
+                       "ps": num("nstep") * dt_ps, "dt_fs": round(dt_ps * 1000, 3),
+                       "bb": num("fc_bb") / KCAL_A2_TO_KJ_NM2, "sc": num("fc_sc") / KCAL_A2_TO_KJ_NM2,
+                       "lip": num("fc_mpos") / KCAL_A2_TO_KJ_NM2, "tor": num("fc_mdih") / 4.184,
+                       "wat": num("fc_wat") / KCAL_A2_TO_KJ_NM2, "ion": num("fc_ion") / KCAL_A2_TO_KJ_NM2,
+                       "source": str(f.name)})
+    return stages
+
+
+def add_restraints(system, x0_nm: np.ndarray, groups: dict[str, list[int]], torsions=(), z_mid_nm: float = 0.0,
+                   water_core_nm: float = 0.0) -> None:
+    """All equilibration restraints, CHARMM-GUI style (E = k·d², CHARMM convention), each with a global strength
+    set per stage: kbb/ksc (positions of the protein backbone / other solute heavy atoms), klip (z of lipid heads),
+    kion (bulk ions), kwat (flat-bottom: no water oxygen within ``water_core_nm`` of the bilayer centre) and ktor
+    (flat-bottom lipid dihedrals). Units: kJ/mol/nm² and kJ/mol/rad²."""
     import openmm as mm
-    pos = mm.CustomExternalForce("0.5*(isbb*kbb + (1-isbb)*ksc)*periodicdistance(x, y, z, x0, y0, z0)^2")
+    pos = mm.CustomExternalForce("(isbb*kbb + (1-isbb)*ksc)*periodicdistance(x, y, z, x0, y0, z0)^2")
     for n in ("kbb", "ksc"):
         pos.addGlobalParameter(n, 0.0)
     for n in ("isbb", "x0", "y0", "z0"):
@@ -184,12 +265,33 @@ def add_restraints(system, x0_nm: np.ndarray, groups: dict[str, list[int]]) -> N
     for i in groups["sc"]:
         pos.addParticle(i, [0.0, *x0_nm[i].tolist()])
     system.addForce(pos)
-    zf = mm.CustomExternalForce("0.5*klip*(z-z0)^2")
+    zf = mm.CustomExternalForce("klip*(z-z0)^2")
     zf.addGlobalParameter("klip", 0.0)
     zf.addPerParticleParameter("z0")
     for i in groups["heads"]:
         zf.addParticle(i, [float(x0_nm[i, 2])])
     system.addForce(zf)
+    ion = mm.CustomExternalForce("kion*periodicdistance(x, y, z, x0, y0, z0)^2")
+    ion.addGlobalParameter("kion", 0.0)
+    for n in ("x0", "y0", "z0"):
+        ion.addPerParticleParameter(n)
+    for i in groups.get("ions", []):
+        ion.addParticle(i, x0_nm[i].tolist())
+    system.addForce(ion)
+    wat = mm.CustomExternalForce("kwat*max(0, zcore - abs(z - zmid))^2")
+    wat.addGlobalParameter("kwat", 0.0)
+    wat.addGlobalParameter("zmid", float(z_mid_nm))
+    wat.addGlobalParameter("zcore", float(water_core_nm))
+    for i in groups.get("water_o", []):
+        wat.addParticle(i, [])
+    system.addForce(wat)
+    tor = mm.CustomTorsionForce("ktor*max(0, abs(d) - w)^2; d = atan2(sin(theta - t0), cos(theta - t0))")
+    tor.addGlobalParameter("ktor", 0.0)
+    tor.addPerTorsionParameter("t0")
+    tor.addPerTorsionParameter("w")
+    for i, j, k, l, t0, w in torsions:
+        tor.addTorsion(int(i), int(j), int(k), int(l), [float(t0), float(w)])
+    system.addForce(tor)
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +345,12 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
     eqc = cfg.get("md.equilibration", {}) or {}
     pc = cfg.get("md.production", {}) or {}
     T = float(cfg.get("md.openmm.temperature_k", 310))
-    stages = list(eqc.get("stages") or [])
+    stages, protocol_src = list(eqc.get("stages") or []), "config md.equilibration.stages (CHARMM-GUI defaults)"
+    cg_dir = cfg.outputs_dir / str(eqc.get("charmm_gui_dir", "charmm_gui"))
+    if eqc.get("protocol", "charmm_gui_if_present") == "charmm_gui_if_present" and cg_dir.exists():
+        cg = charmm_gui_stages(cg_dir)
+        if cg:
+            stages, protocol_src = cg, f"CHARMM-GUI OpenMM inputs in {cg_dir} ({len(cg)} steps)"
     plan = plan_segments(stages, float(eqc.get("segment_ps", 25)), "eq")
     if phase == "prod":
         plan = plan_segments(production_stages(cfg), float(pc.get("segment_ps", 1000)), "prod")
@@ -274,12 +381,18 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
     groups = groups_from_topology(top)
     if not groups["heads"]:
         issues.add("md", Status.WARNING, "no lipid head atoms (PC P31 / CHL O1) found: no lipid restraint, no area per lipid")
-    add_restraints(base, x0, groups)
+    z_mid = float(np.mean(x0[groups["heads"], 2])) if groups["heads"] else 0.0
+    torsions = lipid_torsions([(a.index, a.residue.name, a.element.symbol if a.element is not None else "", a.residue.index)
+                               for a in top.atoms()], [(b[0].index, b[1].index) for b in top.bonds()], x0)
+    # water-exclusion core: CHARMM-GUI keeps water out of the hydrophobic core; here the core reaches to
+    # md.equilibration.water_core_offset_A (default 7 Å) inside the mean head-group plane of each leaflet
+    head_dz = float(np.mean(np.abs(x0[groups["heads"], 2] - z_mid))) if groups["heads"] else 0.0
+    water_core = max(0.0, head_dz - float(eqc.get("water_core_offset_A", 7.0)) / 10.0)
+    add_restraints(base, x0, groups, torsions, z_mid, water_core)
     box0 = prm.topology.getPeriodicBoxVectors() or app.AmberInpcrdFile(str(sysdir / "system.inpcrd")).boxVectors
     zinfo = json.loads((sysdir / "zn_r0_correction.json").read_text()) if (sysdir / "zn_r0_correction.json").exists() else {}
     zn_pairs = [tuple(p) for p in zinfo.get("pairs", [])]
     zn_ref = np.array(zinfo.get("crystal r0 (Å)", []), dtype=float)
-    z_mid = float(np.mean(x0[groups["heads"], 2])) if groups["heads"] else 0.0
     ca = groups["ca"]
     solute = groups["solute"]
     if not (out / "solute.pdb").exists():
@@ -289,6 +402,8 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
     info = {"atoms": base.getNumParticles(), "forces removed from system.xml": ", ".join(removed) or "none",
             "H with repartitioned mass": n_hmr, "backbone restrained": len(groups["bb"]),
             "other solute heavy restrained": len(groups["sc"]), "lipid heads (z restraint)": len(groups["heads"]),
+            "lipid dihedrals restrained (chirality + cis)": len(torsions), "bulk ions restrained": len(groups["ions"]),
+            "water-exclusion half-thickness (Å)": round(10 * water_core, 1), "protocol source": protocol_src,
             "solute atoms in trajectory": len(solute), "segments in plan": len(plan),
             "segments already done": len(plan) - len(todo)}
 
@@ -323,11 +438,12 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
                 sim.context.setTime(st.getTime())
             else:
                 sim.context.setVelocitiesToTemperature(T * u.kelvin)
-            for n, v in (("kbb", seg["bb"]), ("ksc", seg["sc"]), ("klip", seg["lip"])):
-                sim.context.setParameter(n, v * KCAL_A2_TO_KJ_NM2)
+            for key in RESTRAINT_KEYS:
+                f = 4.184 if key == "tor" else KCAL_A2_TO_KJ_NM2
+                sim.context.setParameter(GLOBALS[key], seg[key] * f)
             cur_stage = seg["stage"]
-            log.info("%s: %s on %s (dt %.0f fs, restraints bb %.1f / sc %.1f / lipid %.1f kcal/mol/Å²)",
-                     phase, cur_stage, platform_name, seg["dt_fs"], seg["bb"], seg["sc"], seg["lip"])
+            log.info("%s: %s on %s (dt %.0f fs, restraints %s)", phase, cur_stage, platform_name, seg["dt_fs"],
+                     ", ".join(f"{k} {seg[k]:g}" for k in RESTRAINT_KEYS))
         # ---- the segment, with solute frames -----------------------------------------------------------
         fsteps = max(1, int(round(frame_ps / (seg["dt_fs"] / 1000.0))))
         dcd_path = out / "traj" / f"{seg['id'].replace(':', '_').replace(' ', '')}.dcd"

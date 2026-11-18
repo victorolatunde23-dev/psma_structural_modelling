@@ -61,3 +61,40 @@ def test_equilibration_checks():
     assert (c != "FAIL").all()
     c = M.equilibration_checks(log(318.0, 0.45), cfg).set_index("Check")["Status"]
     assert c["temperature"] == "FAIL" and c["zn_site"] == "FAIL"
+
+
+def test_lipid_torsions_found_from_bond_graph():
+    """Glycerol C2 (1 H, 2 C, 1 O in a head residue) and the oleoyl CH=CH are found without atom-name tables."""
+    # PC head: C1(0)-C2(1)-C3(2); C2-O21(3); C2-H(4); C1 Hs (5,6); C3 Hs (7,8)
+    # OL tail: C8(10)-C9(11)=C10(12)-C11(13); H on C9 (14), C10 (15); CH2 Hs on C8/C11 (16-19)
+    atoms = [(0, "PC", "C", 0), (1, "PC", "C", 0), (2, "PC", "C", 0), (3, "PC", "O", 0), (4, "PC", "H", 0),
+             (5, "PC", "H", 0), (6, "PC", "H", 0), (7, "PC", "H", 0), (8, "PC", "H", 0),
+             (10, "OL", "C", 1), (11, "OL", "C", 1), (12, "OL", "C", 1), (13, "OL", "C", 1), (14, "OL", "H", 1),
+             (15, "OL", "H", 1), (16, "OL", "H", 1), (17, "OL", "H", 1), (18, "OL", "H", 1), (19, "OL", "H", 1)]
+    bonds = [(0, 1), (1, 2), (1, 3), (1, 4), (0, 5), (0, 6), (2, 7), (2, 8),
+             (10, 11), (11, 12), (12, 13), (11, 14), (12, 15), (10, 16), (10, 17), (13, 18), (13, 19)]
+    x = np.zeros((20, 3))
+    x[[0, 1, 2, 3]] = [[0, 0, 0], [0.15, 0, 0], [0.2, 0.14, 0], [0.2, -0.05, 0.13]]
+    x[[10, 11, 12, 13]] = [[0, 0, 1], [0.15, 0, 1], [0.22, 0.13, 1], [0.12, 0.25, 1]]
+    t = M.lipid_torsions(atoms, bonds, x)
+    chir = [r for r in t if r[2] == 1]
+    cis = [r for r in t if r[1] == 11 and r[2] == 12]
+    assert len(t) == 2 and chir and cis
+    assert chir[0][:4] == (0, 2, 1, 3) and abs(chir[0][5] - np.deg2rad(2.5)) < 1e-12
+    assert cis[0][:4] == (10, 11, 12, 13) and cis[0][4] == 0.0 and cis[0][5] == 0.0
+
+
+def test_charmm_gui_stage_parser(tmp_path):
+    d = tmp_path / "charmm_gui" / "openmm"
+    d.mkdir(parents=True)
+    (d / "step6.1_equilibration.inp").write_text(
+        "nstep  = 125000   # number of steps\ndt     = 0.001    # ps\npcouple = no\n"
+        "fc_bb  = 4184.0\nfc_sc  = 2092.0\nfc_mpos = 1046.0\nfc_mdih = 1000.0\n")
+    (d / "step6.4_equilibration.inp").write_text("nstep = 250000\ndt = 0.002\npcouple = yes\nfc_bb = 418.4\n")
+    st = M.charmm_gui_stages(tmp_path / "charmm_gui")
+    assert [s["name"] for s in st] == ["6.1", "6.4"] and [s["ensemble"] for s in st] == ["NVT", "NPT"]
+    assert abs(st[0]["ps"] - 125) < 1e-9 and st[0]["dt_fs"] == 1.0 and abs(st[1]["ps"] - 500) < 1e-9
+    assert abs(st[0]["bb"] - 10) < 1e-9 and abs(st[0]["sc"] - 5) < 1e-9 and abs(st[0]["lip"] - 2.5) < 1e-9
+    assert abs(st[0]["tor"] - 1000 / 4.184) < 1e-9 and st[0]["wat"] == 0.0 and st[0]["ion"] == 0.0
+    assert st[1]["sc"] == 0.0
+    assert M.charmm_gui_stages(tmp_path / "missing") is None

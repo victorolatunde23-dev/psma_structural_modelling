@@ -424,6 +424,21 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Fix:** each box edge is now **max(packmol box, actual coordinate extent) + 2 Å**. No two atoms can then be closer than 2 Å through the boundary. MergeSummary reports which source set each axis, and the contact count for the plain packmol box.
 - **New tables:** `Minimisation` (stages reached) and **`MinimisationChunks`** (energy and max force after every chunk) are written as the run goes, so a failure shows where it happened.
 
+### Equilibration matches CHARMM-GUI's restraint protocol (v0.7.24)
+
+- **Decision (user, 2026-11-18):** equilibrate the Amber system exactly like the CHARMM-GUI comparison build (job 9494567473), so the two systems differ only in force field and build, not in protocol.
+- **New restraints in `md_run.add_restraints`,** each with a per-stage global strength, released over steps 6.1–6.6:
+  - **lipid dihedrals** (CHARMM-GUI "tforce"/`fc_mdih`): glycerol sn-2 chirality (improper, flat-bottom ±2.5° around the built value) and the oleoyl *cis* C=C (C–C=C–C at 0°). The atoms are found from the bond graph (`lipid_torsions`), so no Lipid21 atom-name table is needed;
+  - **water kept out of the bilayer core** ("wforce"): flat-bottom on water O within (mean head-plane distance − 7 Å) of the bilayer centre;
+  - **bulk Na⁺/Cl⁻** positions, step 1 only ("ion").
+- **CHARMM convention E = k·d²** for every restraint, as in CHARMM-GUI; previously E = ½k·d².
+- **Default scheme = CHARMM-GUI's suggested table:**
+  - bb 10 → 0.1; sc 5 → 0; lipid z 2.5 → 0; water 2.5 → 0; ions 10 then 0 (all kcal/mol/Å²);
+  - dihedrals 239 → 0 kcal/mol/rad² (CHARMM-GUI OpenMM `fc_mdih` 1000/400/200/200/100/0 kJ/mol/rad²);
+  - step lengths and time steps 125/125/125 ps at 1 fs, then 500/500/500 ps at 2 fs.
+- **Exact match from the archive:** `charmm_gui_stages()` reads CHARMM-GUI's own OpenMM inputs (`openmm/step6.N_equilibration.inp`: nstep, dt, pcouple, fc_bb, fc_sc, fc_mpos, fc_mdih, …) when the archive is unpacked in `outputs/charmm_gui/`, and uses them instead of the table. Restraints CHARMM-GUI's OpenMM inputs do not use are set to 0 (`md.equilibration.protocol: charmm_gui_if_present`). MDInfo reports which source was used.
+- Stage names are now 6.1–6.6. An equilibration started with v0.7.23 restarts from the minimised system.
+
 ### Notebook 06: equilibration and production (v0.7.23)
 
 - New `md_run.py`, `scripts/run_md_setup.py equilibrate|produce` and **notebook 06**.
