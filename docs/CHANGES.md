@@ -424,6 +424,18 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Fix:** each box edge is now **max(packmol box, actual coordinate extent) + 2 Å**. No two atoms can then be closer than 2 Å through the boundary. MergeSummary reports which source set each axis, and the contact count for the plain packmol box.
 - **New tables:** `Minimisation` (stages reached) and **`MinimisationChunks`** (energy and max force after every chunk) are written as the run goes, so a failure shows where it happened.
 
+### Equilibration complete (v0.7.30)
+
+- **Equilibration finished on 2026-11-18** (L4; 1.875 ns; CHARMM-GUI protocol from job 9494567473; started 17:44 and completed 20:52 over two sessions). **EquilibrationChecks all PASS:**
+  - temperature: mean 310.0 K over step 6.6;
+  - area per lipid: 52.6 Å² (PC + CHL), flat over 6.5–6.6. The box xy went 171.8 → 160.1 Å; z 206.4 → 205.8 Å;
+  - Zn site: largest Zn–ligand deviation from the crystal 0.29 Å over all 75 segments (limit 0.3), typically 0.10–0.25 Å;
+  - glycerol chirality kept in 100.00 % of lipids in every segment;
+  - Cα RMSD 0.57 Å at the end.
+- Speed on the L4: 10.3 ns/day at 1 fs, 17.5 ns/day at 2 fs.
+- Outputs: `outputs/md_run/equilibrated.pdb`, `state.xml`, `log.csv`, and solute DCD frames (`traj/eq_*.dcd`). `progress.json` has `eq_done: true`.
+- **Fix:** `log.csv` is reloaded with Stage as text. Stage "6.6" read back as the number 6.6 did not match the new rows ("6.6"). The readiness checks then used only the last session's part of step 6.6 (one segment), so `area_stable` was skipped. With all 20 segments of 6.6, the area drift is 0.1 % and the result is unchanged.
+
 ### Glycerol chirality restraint fixed; equilibration restarts (v0.7.29)
 
 - **Run of 2026-11-18 10:45–13:45 (176 min, CUDA):**

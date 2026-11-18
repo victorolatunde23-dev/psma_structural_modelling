@@ -149,3 +149,14 @@ def test_dihedral_sign_matches_iupac_openmm():
     x = rng.normal(size=(9, 3))
     t0 = M.lipid_torsions(atoms, bonds, x)[0]
     assert abs(t0[4] - M.dihedrals(x, np.array([t0[:4]]))[0]) < 1e-12      # restraint target = the built configuration
+
+
+def test_equilibration_checks_mixed_stage_types():
+    """Rows reloaded from log.csv had Stage 6.6 (float) while new rows had "6.6" (str): the last stage was split."""
+    import psma_pipeline
+    df = pd.DataFrame({"Stage": [6.5, 6.6, 6.6, "6.6"], "Potential energy (kJ/mol)": [-6e6] * 4,
+                       "Temperature (K)": [310.0, 309.0, 311.0, 310.0], "Box x (Å)": [160.0] * 4, "Box y (Å)": [160.0] * 4,
+                       "Area per lipid (Å²)": [52.5] * 4, "Max Zn–ligand deviation (Å)": [0.2] * 4,
+                       "Cα RMSD from start (Å)": [0.5] * 4})
+    c = M.equilibration_checks(df, psma_pipeline.load_config()).set_index("Check")
+    assert "area_stable" in c.index and "3 segments" not in c.loc["temperature", "Detail"]

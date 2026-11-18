@@ -474,7 +474,10 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
             "solute atoms in trajectory": len(solute), "segments in plan": len(plan),
             "segments already done": len(plan) - len(todo)}
 
-    rows = pd.read_csv(out / "log.csv").to_dict("records") if (out / "log.csv").exists() else []
+    # Stage names such as "6.6" must stay text: read back as numbers they no longer match the new rows, and the
+    # readiness checks then saw only the last session's part of the final stage (2026-11-18)
+    rows = pd.read_csv(out / "log.csv", dtype={"Stage": str, "Phase": str}).to_dict("records") \
+        if (out / "log.csv").exists() else []
     status, platform_name, cur_stage, sim = "complete", None, None, None
     budget = (max_minutes * 60.0) if max_minutes else None
     seg_secs: list[float] = []
@@ -619,6 +622,7 @@ def equilibration_checks(df: pd.DataFrame, cfg: Any) -> pd.DataFrame:
     rows = []
     add = lambda c, ok, d, warn=False: rows.append(  # noqa: E731
         {"Check": c, "Status": "PASS" if ok else ("WARNING" if warn else "FAIL"), "Detail": d})
+    df = df.assign(Stage=df["Stage"].astype(str))
     stages = list(dict.fromkeys(df["Stage"]))
     last = df[df["Stage"] == stages[-1]] if stages else df
     add("all_finite", df["Potential energy (kJ/mol)"].notna().all() and np.isfinite(df["Potential energy (kJ/mol)"]).all(),
