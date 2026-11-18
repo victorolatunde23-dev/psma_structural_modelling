@@ -531,6 +531,7 @@ md:                             # Milestone 6: system setup (notebook 05)
     friction_per_ps: 1.0
     pressure_bar: 1.0
     surface_tension: 0.0        # bar·nm; tensionless bilayer
+    barostat_steps: 100         # Monte Carlo barostat attempt every 100 steps (CHARMM-GUI p_freq)
     max_temperature_dev_k: 3.0  # readiness: mean T of the last stage within this of md.openmm.temperature_k
     max_area_drift: 0.015       # readiness: relative change of the box xy area over the last stage
     max_zn_dev: 0.3             # Å; readiness: every Zn–ligand distance within this of the crystal, end of each stage

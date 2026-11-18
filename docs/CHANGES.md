@@ -424,6 +424,21 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Fix:** each box edge is now **max(packmol box, actual coordinate extent) + 2 Å**. No two atoms can then be closer than 2 Å through the boundary. MergeSummary reports which source set each axis, and the contact count for the plain packmol box.
 - **New tables:** `Minimisation` (stages reached) and **`MinimisationChunks`** (energy and max force after every chunk) are written as the run goes, so a failure shows where it happened.
 
+### CHARMM-GUI inputs checked; barostat frequency (v0.7.27)
+
+- **Checked against the real CHARMM-GUI OpenMM inputs** (job 9494567473, unpacked on Drive). The restraints, read in kJ/mol/nm² and kJ/mol/rad²:
+
+  | Step | Ensemble, dt | bb | sc | lipid z (fc_lpos) | lipid dihedrals (fc_ldih) |
+  |---|---|---|---|---|---|
+  | 6.1 | NVT, 1 fs | 4000 | 2000 | 1000 | 1000 |
+  | 6.4 | NPT, 2 fs | 500 | 200 | 200 | 200 |
+  | 6.6 | NPT, 2 fs | 50 | 0 | none | none |
+  | 7 production | NPT, 4 fs | no restraints | | | |
+
+  Everything is at 310 K. The membrane barostat is XY-isotropic, Z-free, 1 bar, 0 surface tension, with an attempt every 100 steps. vdW uses a force switch from 10 to 12 Å, the CHARMM36m setting; the Amber system keeps its own force-field cut-off (10 Å).
+- The CHARMM-GUI OpenMM inputs have **no water or ion restraints** (those are only in its CHARMM inputs), so they are 0 when the archive is used.
+- The barostat now attempts a move every 100 steps, as in CHARMM-GUI (`p_freq`, read from the archive; `md.equilibration.barostat_steps`). OpenMM's default is 25.
+
 ### CHARMM-GUI lipid restraint keys (v0.7.26)
 
 - **Found in the first read of the real archive (2026-11-18):** the protein restraints, step lengths and time steps were read correctly (fc_bb 4000 → 9.56 kcal/mol/Å²; 125/125/125 ps at 1 fs, then 500/500/500 ps at 2 fs). But the lipid restraints came out as 0, because CHARMM-GUI's OpenMM inputs call them `fc_lpos` (lipid head z) and `fc_ldih` (lipid dihedrals), not `fc_mpos` / `fc_mdih`. Both spellings are now accepted. The equilibration had not been started.

@@ -64,7 +64,8 @@ def plan_segments(stages: list[dict], segment_ps: float, phase: str = "eq") -> l
             n += 1
             out.append({"id": f"{phase}:{s['name']}:{n}", "phase": phase, "stage": s["name"], "segment": n,
                         "steps": steps, "dt_fs": float(s["dt_fs"]), "ensemble": s.get("ensemble", "NPT"),
-                        **{k: float(s.get(k, 0)) for k in RESTRAINT_KEYS}, "ps": steps * dt})
+                        **{k: float(s.get(k, 0)) for k in RESTRAINT_KEYS}, "ps": steps * dt,
+                        "barostat_steps": int(s.get("barostat_steps", 0) or 0)})
             done += steps
     return out
 
@@ -290,7 +291,7 @@ def charmm_gui_stages(folder: str | Path) -> list[dict] | None:
                        "tor": first("fc_ldih", "fc_mdih") / 4.184,
                        "wat": first("fc_wat") / KCAL_A2_TO_KJ_NM2, "ion": first("fc_ion") / KCAL_A2_TO_KJ_NM2,
                        "fc settings read": ", ".join(f"{k}={kv[k]}" for k in sorted(kv) if k.startswith("fc_")),
-                       "source": str(f.name)})
+                       "barostat_steps": int(num("p_freq", 25)), "source": str(f.name)})
     return stages
 
 
@@ -468,7 +469,8 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
                 system.addForce(mm.MonteCarloMembraneBarostat(
                     float(eqc.get("pressure_bar", 1.0)) * u.bar,
                     float(eqc.get("surface_tension", 0.0)) * u.bar * u.nanometer, T * u.kelvin,
-                    mm.MonteCarloMembraneBarostat.XYIsotropic, mm.MonteCarloMembraneBarostat.ZFree))
+                    mm.MonteCarloMembraneBarostat.XYIsotropic, mm.MonteCarloMembraneBarostat.ZFree,
+                    int(seg.get("barostat_steps") or eqc.get("barostat_steps", 100))))
             dt = seg["dt_fs"] / 1000.0
             sim, integ, platform_name, fails = make_simulation(
                 top, system, lambda: mm.LangevinMiddleIntegrator(T * u.kelvin, float(eqc.get("friction_per_ps", 1.0)) / u.picosecond,
