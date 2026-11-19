@@ -595,7 +595,9 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
     if (out / "start_forces.csv").exists():
         tables["StartForces"] = pd.read_csv(out / "start_forces.csv")
     cur = df[df["Phase"].astype(str) == phase] if len(df) else df          # this phase only: equilibration speeds
-    cur = cur[cur["dt_fs"] == cur["dt_fs"].iloc[-1]] if len(cur) and "dt_fs" in cur else cur   # (1-2 fs) mislead
+    if len(cur) and "dt_fs" in cur and cur["dt_fs"].notna().iloc[-1]:                       # (1-2 fs) mislead
+        cur = cur[cur["dt_fs"] == cur["dt_fs"].iloc[-1]]                                      # logs before v0.7.32
+                                                                                               # have no dt_fs
     rate = float(cur["ns/day"].iloc[-3:].median()) if len(cur) else float("nan")
     left_ns = sum(s["ps"] for s in remaining) / 1000.0
     tables["MDProgress"] = pd.DataFrame([{"Item": k, "Value": v} for k, v in {
