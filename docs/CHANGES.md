@@ -424,6 +424,11 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Fix:** each box edge is now **max(packmol box, actual coordinate extent) + 2 Å**. No two atoms can then be closer than 2 Å through the boundary. MergeSummary reports which source set each axis, and the contact count for the plain packmol box.
 - **New tables:** `Minimisation` (stages reached) and **`MinimisationChunks`** (energy and max force after every chunk) are written as the run goes, so a failure shows where it happened.
 
+### Production speed estimate (v0.7.32)
+
+- MDProgress's "recent speed" and "estimated GPU hours left" now use only the current phase's segments: the median of the last three at the current time step. Previously the first production segments were averaged with the last equilibration segments at 2 fs, which gave 21–26 ns/day instead of the real ~33 ns/day. The log now records `dt_fs` per segment.
+- Production on the L4 (2026-11-18/19): 2 ns done, 32.7–33.0 ns/day at 4 fs. Both sessions stopped after 1 ns because `MAX_MINUTES` was 60.
+
 ### Production length 200 ns (v0.7.31)
 
 - **Decision (user, 2026-11-18):** production is 200 ns (`md.production.ns`), run as 200 × 1 ns segments, each saved to Drive. A run can stop at any segment; finished nanoseconds are kept, and later sessions continue.

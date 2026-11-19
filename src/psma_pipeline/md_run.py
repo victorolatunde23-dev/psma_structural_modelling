@@ -581,7 +581,7 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
                      "Cα RMSD from start (Å)": round(10 * kabsch_rmsd(x[ca], x0[ca]), 3) if ca else None,
                      "Glycerol chirality kept (%)": round(100 * float(np.mean(np.sign(dihedrals(x, chir_q)) == chir_sign)), 2)
                      if len(chir_q) else None,
-                     "ns/day": round(seg["ps"] / 1000.0 / (secs / 86400.0), 2)})
+                     "dt_fs": seg["dt_fs"], "ns/day": round(seg["ps"] / 1000.0 / (secs / 86400.0), 2)})
         pd.DataFrame(rows).to_csv(out / "log.csv", index=False)
         prog["done"].append(seg["id"])
         _atomic_write(prog_file, json.dumps(prog, indent=1))
@@ -594,7 +594,9 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
     tables = {"MDLog": df, "MDInfo": pd.DataFrame([{"Item": k, "Value": v} for k, v in info.items()])}
     if (out / "start_forces.csv").exists():
         tables["StartForces"] = pd.read_csv(out / "start_forces.csv")
-    rate = df["ns/day"].iloc[-3:].mean() if len(df) else float("nan")
+    cur = df[df["Phase"].astype(str) == phase] if len(df) else df          # this phase only: equilibration speeds
+    cur = cur[cur["dt_fs"] == cur["dt_fs"].iloc[-1]] if len(cur) and "dt_fs" in cur else cur   # (1-2 fs) mislead
+    rate = float(cur["ns/day"].iloc[-3:].median()) if len(cur) else float("nan")
     left_ns = sum(s["ps"] for s in remaining) / 1000.0
     tables["MDProgress"] = pd.DataFrame([{"Item": k, "Value": v} for k, v in {
         "phase": phase, "status": status, "segments done": len(plan) - len(remaining), "segments total": len(plan),
