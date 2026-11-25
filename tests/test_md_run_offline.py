@@ -160,3 +160,18 @@ def test_equilibration_checks_mixed_stage_types():
                        "Cα RMSD from start (Å)": [0.5] * 4})
     c = M.equilibration_checks(df, psma_pipeline.load_config()).set_index("Check")
     assert "area_stable" in c.index and "3 segments" not in c.loc["temperature", "Detail"]
+
+
+def test_production_plan_by_time_survives_segment_change():
+    """Sessions on a T4 kept dying inside 1 ns segments (2026-11-25): production is now tracked by time, so the
+    segment length can shrink without losing or repeating the 6 ns already done with 1 ns segments."""
+    prog = {"done": ["eq:6.6:20"] + [f"prod:production:{i}" for i in range(1, 7)]}
+    t0 = M.prod_done_ps(prog)
+    assert t0 == 6000.0
+    plan = M.production_plan(200_000.0, 250.0, t0, 4.0)
+    assert plan[0]["id"] == "prod:t6000" and plan[0]["steps"] == 62_500 and plan[0]["start_ps"] == 6000.0
+    assert len(plan) == (200_000 - 6000) // 250 and abs(sum(p["ps"] for p in plan) - 194_000) < 1e-6
+    assert len({p["id"] for p in plan}) == len(plan)
+    prog["prod_done_ps"] = 6250.0
+    assert M.production_plan(200_000.0, 250.0, M.prod_done_ps(prog), 4.0)[0]["id"] == "prod:t6250"
+    assert M.production_plan(1000.0, 250.0, 1000.0, 4.0) == []

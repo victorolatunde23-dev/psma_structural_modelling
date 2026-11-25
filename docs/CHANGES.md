@@ -424,6 +424,13 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Fix:** each box edge is now **max(packmol box, actual coordinate extent) + 2 Å**. No two atoms can then be closer than 2 Å through the boundary. MergeSummary reports which source set each axis, and the contact count for the plain packmol box.
 - **New tables:** `Minimisation` (stages reached) and **`MinimisationChunks`** (energy and max force after every chunk) are written as the run goes, so a failure shows where it happened.
 
+### Production saved every 250 ps, tracked by time (v0.7.33)
+
+- **2026-11-25:** three sessions in a row ended before finishing ns 7. One ran on a T4 at ~11 ns/day, where 1 ns takes ~2.2 h, longer than the session lasted. Production was saved only at the end of each 1 ns segment, so each session lost everything since the last save. 6 ns had been saved (on 19 Nov).
+- **Production is now saved every 250 ps** (`md.production.segment_ps`): about 11 min on an L4, about 33 min on a T4.
+- **Progress is tracked by simulated time** (`prod_done_ps` in progress.json; segment ids `prod:t<start ps>`), so the segment length can change between sessions. Progress recorded before v0.7.33 (`prod:production:N`, 1 ns each) is counted as N × 1000 ps, so the 6 ns already done are kept.
+- MDProgress shows "production done (ns)" and the target.
+
 ### Production speed estimate (v0.7.32)
 
 - MDProgress's "recent speed" and "estimated GPU hours left" now use only the current phase's segments: the median of the last three at the current time step. Previously the first production segments were averaged with the last equilibration segments at 2 fs, which gave 21–26 ns/day instead of the real ~33 ns/day. The log now records `dt_fs` per segment.

@@ -73,6 +73,29 @@ def plan_segments(stages: list[dict], segment_ps: float, phase: str = "eq") -> l
     return out
 
 
+def production_plan(total_ps: float, segment_ps: float, done_ps: float, dt_fs: float) -> list[dict]:
+    """Production segments from ``done_ps`` to ``total_ps``. Ids carry the start time (``prod:t<ps>``), so the
+    segment length can change between sessions without losing track of what has been simulated."""
+    out, t, n = [], float(done_ps), 0
+    step_ps = dt_fs / 1000.0
+    while t < total_ps - 1e-6:
+        ps = min(float(segment_ps), total_ps - t)
+        n += 1
+        out.append({"id": f"prod:t{t:.0f}", "phase": "prod", "stage": "production", "segment": n,
+                    "steps": int(round(ps / step_ps)), "dt_fs": float(dt_fs), "ensemble": "NPT",
+                    **{k: 0.0 for k in RESTRAINT_KEYS}, "ps": ps, "start_ps": t, "barostat_steps": 0})
+        t += ps
+    return out
+
+
+def prod_done_ps(prog: dict, legacy_segment_ps: float = 1000.0) -> float:
+    """Production time already simulated: ``prod_done_ps`` in progress.json, or, for progress written before
+    v0.7.33, the number of finished 1 ns segments (ids ``prod:production:N``) × their length."""
+    if "prod_done_ps" in prog:
+        return float(prog["prod_done_ps"])
+    return float(sum(1 for i in prog.get("done", []) if i.startswith("prod:production:"))) * legacy_segment_ps
+
+
 def production_stages(cfg: Any) -> list[dict]:
     p = cfg.get("md.production", {}) or {}
     return [{"name": "production", "ensemble": "NPT", "ps": float(p.get("ns", 100)) * 1000.0,
@@ -410,7 +433,7 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
             stages, protocol_src = cg, f"CHARMM-GUI OpenMM inputs in {cg_dir} ({len(cg)} steps)"
     plan = plan_segments(stages, float(eqc.get("segment_ps", 25)), "eq")
     if phase == "prod":
-        plan = plan_segments(production_stages(cfg), float(pc.get("segment_ps", 1000)), "prod")
+        plan = []                                    # built below, once progress.json is read
     frame_ps = float((pc if phase == "prod" else eqc).get("frame_ps", 10 if phase == "prod" else 5))
 
     # ---- progress / resume ------------------------------------------------------------------------------
@@ -426,6 +449,10 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
         state_file.unlink(missing_ok=True)
     if phase == "prod" and not prog.get("eq_done"):
         raise RuntimeError("equilibration has not finished (or did not pass): run section E first")
+    if phase == "prod":
+        prod_t0 = prod_done_ps(prog, float(pc.get("legacy_segment_ps", 1000)))
+        plan = production_plan(float(pc.get("ns", 200)) * 1000.0, float(pc.get("segment_ps", 250)), prod_t0,
+                               float(pc.get("dt_fs", 4)))
     todo = [s for s in plan if s["id"] not in set(prog["done"])]
 
     # ---- system ----------------------------------------------------------------------------------------
@@ -584,6 +611,8 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
                      "dt_fs": seg["dt_fs"], "ns/day": round(seg["ps"] / 1000.0 / (secs / 86400.0), 2)})
         pd.DataFrame(rows).to_csv(out / "log.csv", index=False)
         prog["done"].append(seg["id"])
+        if phase == "prod":
+            prog["prod_done_ps"] = round(prod_done_ps(prog, float(pc.get("legacy_segment_ps", 1000))) + seg["ps"], 3)
         _atomic_write(prog_file, json.dumps(prog, indent=1))
         log.info("%s done: T %.1f K, APL %.1f Å², Zn dev %s Å, %.1f ns/day", seg["id"], rows[-1]["Temperature (K)"], apl,
                  rows[-1]["Max Zn–ligand deviation (Å)"], rows[-1]["ns/day"])
@@ -601,7 +630,10 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
     rate = float(cur["ns/day"].iloc[-3:].median()) if len(cur) else float("nan")
     left_ns = sum(s["ps"] for s in remaining) / 1000.0
     tables["MDProgress"] = pd.DataFrame([{"Item": k, "Value": v} for k, v in {
-        "phase": phase, "status": status, "segments done": len(plan) - len(remaining), "segments total": len(plan),
+        "phase": phase, "status": status,
+        **({"production done (ns)": round(prod_done_ps(prog, float(pc.get("legacy_segment_ps", 1000))) / 1000, 3),
+            "production target (ns)": float(pc.get("ns", 200))} if phase == "prod" else {}),
+        "segments done": len(plan) - len(remaining), "segments total": len(plan),
         "simulated time left (ns)": round(left_ns, 3), "recent speed (ns/day)": round(float(rate), 2) if rate == rate else None,
         "estimated GPU hours left": round(left_ns / rate * 24, 1) if rate and rate == rate else None}.items()])
     if phase == "eq" and not remaining and status == "complete":

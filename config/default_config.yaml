@@ -538,5 +538,7 @@ md:                             # Milestone 6: system setup (notebook 05)
   production:
     ns: 200                     # USER DECISION (2026-11-18): 200 ns total production (resumable over as many Colab sessions as needed)
     dt_fs: 4                    # with HMR (hmr_mass above)
-    segment_ps: 1000            # state saved and a trajectory file closed every segment
+    segment_ps: 250             # state saved every 250 ps (~11 min on an L4, ~33 min on a T4): an interrupted
+                                # session loses at most one segment (was 1000 ps until v0.7.32)
+    legacy_segment_ps: 1000     # length of the production segments recorded before v0.7.33 (prod:production:N)
     frame_ps: 10                # solute frame every 10 ps (10,000 frames per 100 ns)
