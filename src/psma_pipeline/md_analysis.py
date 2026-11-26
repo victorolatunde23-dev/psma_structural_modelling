@@ -115,6 +115,13 @@ def segment_files(md_dir: str | Path, phase: str = "prod") -> list[tuple[float, 
     """Finished segment files of one phase, in time order, as (start time in ps within the phase, path).
     Only segments listed as done in progress.json are used: a file from an interrupted segment is ignored."""
     md_dir = Path(md_dir)
+    if not (md_dir / "progress.json").exists():
+        parent = md_dir.parent
+        seen = sorted(p.name for p in parent.iterdir()) if parent.exists() else []
+        raise FileNotFoundError(
+            f"{md_dir / 'progress.json'} not found. This Google account's Drive does not show the MD run: mount the "
+            f"account that runs notebook 06 (or that has the shared psma_structural_modelling folder in My Drive). "
+            f"Folders found in {parent}: {', '.join(seen) or 'none'}")
     done = set(json.loads((md_dir / "progress.json").read_text()).get("done", []))
     out = []
     for sid in done:
