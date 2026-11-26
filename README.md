@@ -23,6 +23,7 @@ for every component and [`docs/PLAN.md`](docs/PLAN.md) for the full plan.
 | `04_model_preparation.ipynb` | hybrid model (9S7U ectodomain dimer + AlphaFold2 membrane anchor), repairs, Zn site + treatment options, core GlcNAc, PROPKA protonation + microstates, membrane-oriented model, provenance ([design](docs/M5_MODEL_PREPARATION.md)) | **M5 ✔** (Colab run pending) |
 | `05_md_system_setup.ipynb` | part A: bonded Zn parameters with MCPB.py, QM in PySCF inside Colab ([design](docs/M6_ZINC_PARAMETERS.md)); part B: membrane system build, minimisation, MD readiness | **M6 parts A and B ✔** (Colab runs pending) |
 | `06_md_trajectory_analysis.ipynb` | stability, interfaces, Zn geometry, lid dynamics, convergence | M7 |
+| `08_md_quick_checks.ipynb` | standalone follow-up to 07 (MDTraj, calculations in the notebook): TM helicity, lid RMSD refitted on 62–750, bonded vs non-bonded Zn model; results of the 13.5 ns run recorded in the notebook | extra |
 
 ## Quick start
 
