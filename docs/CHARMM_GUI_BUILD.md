@@ -41,3 +41,8 @@
 
 ## Equilibration protocol (shared)
 Notebook 06 (v0.7.24) equilibrates the Amber system with CHARMM-GUI's restraint protocol: backbone, side chains, lipid-head z, lipid dihedrals, water out of the bilayer core, and ions in step 1, with E = k·d². When this job's archive is unpacked in `outputs/charmm_gui/` on Drive, the exact values are read from its `openmm/step6.N_equilibration.inp` files.
+
+## Shared limitation (all three systems: Amber, CHARMM36m, OPLS4)
+All three systems start from the notebook 04 model, which keeps only 4 crystal waters: the zinc-bridging water in each chain and one more per chain. The other buried structural waters of 9S7U were not carried over. This is why Maestro's Protein Reports shows many "buried unsatisfied donors/acceptors".
+
+**Decision (user, 2026-11-26):** keep it this way, so that all force-field runs start from the same structure and the comparison stays fair. Some waters can enter cavities during MD. For later projects or replicas, consider transferring the internal crystal waters of 9S7U before the build.
