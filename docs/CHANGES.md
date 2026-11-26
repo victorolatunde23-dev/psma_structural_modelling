@@ -426,6 +426,26 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 
 ## Milestone 7 — trajectory analysis
 
+### Part 2: orientation, entrance lid, zinc site (v0.8.1)
+
+- **Part 1 result (10.5 ns, 2026-11-26):** the crystal ectodomain is stable (RMSD 1.06 Å, drift +0.3 Å). The whole-protein RMSD comes from the AlphaFold anchor: tails 17–39 Å; TM helices 5–10 Å relative to the ectodomain, moving as one unit. The lid drifts slowly (1.0 → 1.5–2.0 Å). The zinc ligands are among the most rigid residues (RMSF 0.4–0.6 Å).
+- New `site_and_shape()`: one pass over the trajectory, using all solute atoms. Notebook 07, sections C–E. The membrane normal is the box z axis: the trajectory holds the solute only, and the barostat keeps the membrane in xy.
+  - **Orientation:**
+    - tilt of each TM helix (principal axis of Cα 22–42) from the normal, and the angle between the two helices;
+    - TM helix separation;
+    - tilt and height of the ectodomain dimer relative to the TM pair.
+  - **Entrance lid, per chain:**
+    - helicity: the share of Cα i,i+3 distances under 6 Å, with the same thresholds as the M2 lid classifier (`regions.entrance_lid.classifier`);
+    - lid Cα RMSD to the M2 calibration structures **3BHX (closed)** and **2XEG (open)**, after superposing the chain's ectodomain (lid ± 2 excluded). The references come from `reference_lid_ca()`: RCSB mmCIF plus SIFTS, through the pipeline cache;
+    - per-frame state by helicity and by nearest reference;
+    - lid-to-zinc and Trp541-ring-to-zinc distances.
+  - **Zinc site:**
+    - ligands are found from the first production frame (N/O atoms within 2.8 Å of each Zn). Each Zn goes to the chain with the nearest His377/Glu425 and is named Zn1 (nearer His377) or Zn2;
+    - every Zn–ligand distance and the Zn–Zn distance per frame;
+    - `zinc_summary()` reports start, mean, SD, max, and the % of frames more than 0.5 Å above the start.
+- Summaries: `describe()` gives mean, SD, range, start and last half; `lid_state_summary()` gives the % of frames closed or open.
+- Outputs: `orientation*.csv`, `lid*.csv`, `zinc*.csv`, `zinc_ligands.csv`, `orientation.png`, `entrance_lid.png`, `zinc_site.png`.
+
 ### Part 1: stability by region (v0.8.0)
 
 - New `md_analysis.py` and **notebook 07** (`07_md_analysis.ipynb`). They read the production frames that notebook 06 saves (`outputs/md_run/solute.pdb` + `traj/*.dcd`) with a built-in DCD reader (numpy only), so they run in Colab's own Python on a **CPU** runtime, alongside production.
