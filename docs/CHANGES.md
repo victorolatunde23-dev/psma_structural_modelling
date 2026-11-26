@@ -424,6 +424,19 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 - **Fix:** each box edge is now **max(packmol box, actual coordinate extent) + 2 Å**. No two atoms can then be closer than 2 Å through the boundary. MergeSummary reports which source set each axis, and the contact count for the plain packmol box.
 - **New tables:** `Minimisation` (stages reached) and **`MinimisationChunks`** (energy and max force after every chunk) are written as the run goes, so a failure shows where it happened.
 
+## Milestone 7 — trajectory analysis
+
+### Part 1: stability by region (v0.8.0)
+
+- New `md_analysis.py` and **notebook 07** (`07_md_analysis.ipynb`). They read the production frames that notebook 06 saves (`outputs/md_run/solute.pdb` + `traj/*.dcd`) with a built-in DCD reader (numpy only), so they run in Colab's own Python on a **CPU** runtime, alongside production.
+- Only segments listed as finished in `progress.json` are used, in time order (1 ns segments before v0.7.33, then 250 ps). Files from interrupted segments are ignored, and a truncated last frame is skipped.
+- Regions (UniProt, each chain; hybrid junction at 61/62): cytoplasmic tail 1–19, transmembrane helix 20–43, stalk 44–61 (AlphaFold, mean pLDDT ~44), **crystal ectodomain 62–750**, entrance lid 541–548.
+- Each frame is superposed on the crystal ectodomain of both chains. The tables give: RMSD per region and chain relative to the ectodomain; each chain's ectodomain superposed on itself; "all Cα, global fit" (the value notebook 06 logs); and per-residue Cα RMSF.
+- Outputs go to `outputs/md_analysis/`: `rmsd_by_region.csv`, `rmsd_summary.csv` (mean, max, last-half mean and drift per region), `rmsf_ca.csv`, and the figures.
+- Motivation: at 10 ns, the whole-protein Cα RMSD from notebook 06 had crept up to 4.5–4.7 Å. This shows which part is moving.
+
+## Milestone 6 (continued)
+
 ### Production saved every 250 ps, tracked by time (v0.7.33)
 
 - **2026-11-25:** three sessions in a row ended before finishing ns 7. One ran on a T4 at ~11 ns/day, where 1 ns takes ~2.2 h, longer than the session lasted. Production was saved only at the end of each 1 ns segment, so each session lost everything since the last save. 6 ns had been saved (on 19 Nov).
