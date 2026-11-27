@@ -175,3 +175,47 @@ def test_production_plan_by_time_survives_segment_change():
     prog["prod_done_ps"] = 6250.0
     assert M.production_plan(200_000.0, 250.0, M.prod_done_ps(prog), 4.0)[0]["id"] == "prod:t6250"
     assert M.production_plan(1000.0, 250.0, 1000.0, 4.0) == []
+
+
+STATE = '<?xml version="1.0" ?>\n<State time="{t}" type="State">\n\t<Positions>\n\t\t<Position x="1" y="2" z="3"/>\n\t</Positions>\n</State>\n'
+
+
+def test_checkpoint_written_in_place_with_backup(tmp_path):
+    # a rename (the old temp-file write) gives the file a new inode; on Google Drive it left an orphaned
+    # 88 MB copy in the running account's My Drive at every save
+    p = tmp_path / "state.xml"
+    M._write_checkpoint(p, STATE.format(t=100))
+    inode = p.stat().st_ino
+    M._write_checkpoint(p, STATE.format(t=200))
+    assert p.stat().st_ino == inode                                    # same file, overwritten in place
+    assert 'time="200"' in p.read_text()
+    assert 'time="100"' in M._backup_path(p).read_text()                # previous complete version kept
+    assert sorted(f.name for f in tmp_path.iterdir()) == ["state.xml", "state.xml.bak"]   # no temp files left
+    bak_inode = M._backup_path(p).stat().st_ino
+    M._write_checkpoint(p, STATE.format(t=300))
+    assert M._backup_path(p).stat().st_ino == bak_inode                 # the backup is reused, not recreated
+
+
+def test_incomplete_checkpoint_falls_back_to_backup(tmp_path, caplog):
+    p = tmp_path / "state.xml"
+    M._write_checkpoint(p, STATE.format(t=100))
+    M._write_checkpoint(p, STATE.format(t=200))
+    full = p.read_text()
+    p.write_text(full[: len(full) // 2])                                # session ended mid-write
+    assert not M._is_complete(p) and M._is_complete(M._backup_path(p))
+    assert 'time="100"' in M._read_checkpoint(p)                        # previous state, matches old progress.json
+    assert "incomplete" in caplog.text
+    # the next save must not copy the broken file over the good backup
+    M._write_checkpoint(p, STATE.format(t=300))
+    assert 'time="100"' in M._backup_path(p).read_text() and 'time="300"' in M._read_checkpoint(p)
+
+
+def test_progress_json_checkpoint(tmp_path):
+    p = tmp_path / "progress.json"
+    M._write_checkpoint(p, '{"done": ["a"]}')
+    M._write_checkpoint(p, '{"done": ["a", "b"]}')
+    p.write_text('{"done": ["a", "b"')                                  # truncated JSON
+    assert M._read_checkpoint(p) == '{"done": ["a"]}'
+    p.unlink()                                                          # only the backup survived
+    assert M._read_checkpoint(p) == '{"done": ["a"]}'
+    assert not M._is_complete(tmp_path / "missing.json")
