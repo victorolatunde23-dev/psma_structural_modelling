@@ -14,7 +14,8 @@ before a segment that would not finish in time.
 
 Outputs (``outputs/md_run/``):
 
-- ``state.xml``: latest state; ``progress.json``: finished segments;
+- ``state.xml``: latest state; ``progress.json``: finished segments (each with a ``.bak`` copy of the
+  previous version, written in place: see ``_write_checkpoint``);
 - ``log.csv``: one row per segment (temperature, box, area per lipid, Zn distances, Cα RMSD, ns/day);
 - ``solute.pdb`` + ``traj/<phase>_<segment>.dcd``: solute frames (protein, Zn site, glycans);
 - ``equilibrated.pdb``: full system at the end of equilibration.
@@ -25,6 +26,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import re
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -385,10 +389,64 @@ def _sha(p: Path) -> str:
     return h.hexdigest()[:16]
 
 
-def _atomic_write(path: Path, text: str) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(text)
-    tmp.replace(path)
+def _backup_path(path: Path) -> Path:
+    return path.with_name(path.name + ".bak")
+
+
+def _is_complete(path: Path) -> bool:
+    """True if ``path`` was written to the end: valid JSON, or XML whose root element is closed.
+
+    A Colab session can end while a checkpoint is being written; the half-written file must not be trusted.
+    """
+    try:
+        size = path.stat().st_size
+        if size == 0:
+            return False
+        if path.suffix == ".json":
+            json.loads(path.read_text())
+            return True
+        if path.suffix == ".xml":
+            with open(path, "rb") as fh:
+                head = fh.read(512)
+                fh.seek(max(0, size - 256))
+                tail = fh.read()
+            root = re.search(rb"<([A-Za-z_][\w.-]*)[\s>/]", head.split(b"?>", 1)[-1])
+            return bool(root) and tail.rstrip().endswith(b"</" + root.group(1) + b">")
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _write_checkpoint(path: Path, text: str) -> None:
+    """Overwrite ``path`` in place, keeping the previous complete version as ``<name>.bak``.
+
+    Not "write a temp file, then rename it over ``path``": on Google Drive (Colab), when ``path`` belongs to
+    another account, every rename leaves the temp file orphaned in the running account's My Drive. With an
+    88 MB state.xml per 250 ps segment that was ~11 GB a day (48 orphans, 4.2 GB, by 2026-11-27). Writing in
+    place keeps the Drive file, its id and its owner. If a session ends mid-write, ``_read_checkpoint`` falls
+    back to the ``.bak`` copy, which matches the previous progress.json.
+    """
+    data = text.encode()
+    if _is_complete(path):
+        shutil.copyfile(path, _backup_path(path))         # copyfile overwrites the .bak in place too
+    with open(path, "wb") as fh:
+        fh.write(data)
+        fh.flush()
+        os.fsync(fh.fileno())
+    size = path.stat().st_size
+    if size != len(data):
+        raise OSError(f"{path}: wrote {len(data)} bytes, but the file has {size}")
+
+
+def _read_checkpoint(path: Path) -> str:
+    """Text of ``path``, or of ``<name>.bak`` if ``path`` is incomplete (a session ended while writing it)."""
+    if _is_complete(path):
+        return path.read_text()
+    bak = _backup_path(path)
+    if _is_complete(bak):
+        log.warning("%s is incomplete (a session probably ended while writing it): using %s", path.name, bak.name)
+        return bak.read_text()
+    return path.read_text()                               # neither is usable: let the caller report the error
 
 
 def _subset_topology(topology, idx: list[int]):
@@ -439,7 +497,7 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
     # ---- progress / resume ------------------------------------------------------------------------------
     key = f"{PROTOCOL_VERSION}:{_sha(sysdir / 'system.xml')}:{_sha(sysdir / 'system_minimised.pdb')}"
     prog_file, state_file = out / "progress.json", out / "state.xml"
-    prog = json.loads(prog_file.read_text()) if prog_file.exists() else {}
+    prog = json.loads(_read_checkpoint(prog_file)) if prog_file.exists() or _backup_path(prog_file).exists() else {}
     if prog.get("key") != key:
         if prog:
             issues.add("md", Status.WARNING, "system changed since the last MD run: starting again from the minimised system")
@@ -447,6 +505,7 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
         if (out / "log.csv").exists():                 # keep the superseded run's log for the record
             (out / "log.csv").replace(out / f"log_superseded_{time.strftime('%Y%m%d_%H%M%S')}.csv")
         state_file.unlink(missing_ok=True)
+        _backup_path(state_file).unlink(missing_ok=True)
     if phase == "prod" and not prog.get("eq_done"):
         raise RuntimeError("equilibration has not finished (or did not pass): run section E first")
     if phase == "prod":
@@ -531,8 +590,8 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
             for key in RESTRAINT_KEYS:
                 f = 4.184 if key == "tor" else KCAL_A2_TO_KJ_NM2
                 sim.context.setParameter(GLOBALS[key], seg[key] * f)
-            if state_file.exists():
-                st = mm.XmlSerializer.deserialize(state_file.read_text())
+            if state_file.exists() or _backup_path(state_file).exists():
+                st = mm.XmlSerializer.deserialize(_read_checkpoint(state_file))
                 sim.context.setPeriodicBoxVectors(*st.getPeriodicBoxVectors())
                 sim.context.setPositions(st.getPositions())
                 sim.context.setVelocities(st.getVelocities())
@@ -592,7 +651,7 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
             issues.add("md", Status.FAIL, f"{seg['id']}: energy {e} (not finite): the run stopped; the last good state is kept")
             status = "failed"
             break
-        _atomic_write(state_file, mm.XmlSerializer.serialize(st))
+        _write_checkpoint(state_file, mm.XmlSerializer.serialize(st))
         box = np.diag(st.getPeriodicBoxVectors(asNumpy=True).value_in_unit(u.nanometer))
         apl, up, lo = area_per_lipid(box[0] * box[1], x[groups["heads"], 2], z_mid) if groups["heads"] else (np.nan, 0, 0)
         d = distances(x, zn_pairs) if zn_pairs else np.array([])
@@ -613,7 +672,7 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
         prog["done"].append(seg["id"])
         if phase == "prod":
             prog["prod_done_ps"] = round(prod_done_ps(prog, float(pc.get("legacy_segment_ps", 1000))) + seg["ps"], 3)
-        _atomic_write(prog_file, json.dumps(prog, indent=1))
+        _write_checkpoint(prog_file, json.dumps(prog, indent=1))
         log.info("%s done: T %.1f K, APL %.1f Å², Zn dev %s Å, %.1f ns/day", seg["id"], rows[-1]["Temperature (K)"], apl,
                  rows[-1]["Max Zn–ligand deviation (Å)"], rows[-1]["ns/day"])
     remaining = [s for s in plan if s["id"] not in set(prog["done"])]
@@ -641,8 +700,8 @@ def run_md(cfg: Any, phase: str = "eq", max_minutes: float | None = None, issues
         tables["EquilibrationChecks"] = checks
         ok = (checks["Status"] != "FAIL").all()
         prog["eq_done"] = bool(ok)
-        _atomic_write(prog_file, json.dumps(prog, indent=1))
-        st = mm.XmlSerializer.deserialize(state_file.read_text())
+        _write_checkpoint(prog_file, json.dumps(prog, indent=1))
+        st = mm.XmlSerializer.deserialize(_read_checkpoint(state_file))
         with open(out / "equilibrated.pdb", "w") as fh:
             app.PDBFile.writeFile(top, st.getPositions(), fh, keepIds=True)
         if not ok:

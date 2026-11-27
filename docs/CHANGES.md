@@ -426,6 +426,15 @@ The full design is in `docs/M6_SYSTEM_BUILD.md`.
 
 ## Milestone 7 — trajectory analysis
 
+### Checkpoint written in place: no more orphaned state.xml copies on Drive (v0.8.2)
+
+- **2026-11-27:** production stopped at 00:21 after a 7 h session, with 17.75 ns done (the last segment, `prod_t17750`, was cut off at 22 of 25 frames and is redone on resume). The running account's My Drive held **48 orphaned `state.xml` files (88 MB each, 4.2 GB)**, one per segment since 25 Nov. At ~33 ns/day that is ~11 GB per day of production, close to a free account's 15 GB.
+- **Cause:** checkpoints were written to `state.xml.tmp` and renamed over `state.xml`. In `md_run/`, `state.xml` belongs to the other Google account, and on Drive (Colab) each such rename left the renamed temp file orphaned in the *running* account's My Drive instead of deleting it. `progress.json`, owned by the running account, did not leak. `log.csv`, which is overwritten in place by pandas, did not either.
+- **Fix:** `_write_checkpoint()` overwrites `state.xml` and `progress.json` **in place** (same Drive file, id and owner) and checks the size written. The previous complete version is first copied to `state.xml.bak` / `progress.json.bak`, which are also overwritten in place, so each is a single file.
+- **Resume:** `_read_checkpoint()` uses the `.bak` copy if the main file is incomplete (truncated XML or JSON, from a session that ended mid-write). The backup matches the previous progress.json, so the interrupted segment is simply redone. A broken file is never copied over a good backup.
+- **Clean-up (by hand, once):** in the running account's Drive, search `is:unorganized owner:me`, delete the orphaned `state.xml` files, then empty the Bin. The real checkpoint lives in `md_run/` and does not appear in that search.
+- Not changed: the state is still saved before progress.json, so a session that ends between the two writes resumes from a state one segment ahead of progress.json (as before).
+
 ### Part 2: orientation, entrance lid, zinc site (v0.8.1)
 
 - **Part 1 result (10.5 ns, 2026-11-26):** the crystal ectodomain is stable (RMSD 1.06 Å, drift +0.3 Å). The whole-protein RMSD comes from the AlphaFold anchor: tails 17–39 Å; TM helices 5–10 Å relative to the ectodomain, moving as one unit. The lid drifts slowly (1.0 → 1.5–2.0 Å). The zinc ligands are among the most rigid residues (RMSF 0.4–0.6 Å).
